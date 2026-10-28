@@ -1,6 +1,6 @@
 [project]
 name = "lithovox-exports"
-version = "0.1.0"
+version = "0.2.0"
 description = "Exporteer LithoVox-corridormodellen (.nc) naar D-Stability, D-Geo Flow, XSLOPE, DXF, CSV, GLB, 3D Tiles en LAZ"
 readme = "README.md"
 authors = [
@@ -34,7 +34,7 @@ Homepage = "https://www.lithovox.com"
 lithovox-exports = "lithovox_exports.cli:main"
 
 [build-system]
-requires = ["uv_build>=0.12.21,<0.13.0"]
+requires = ["uv_build>=0.12.21,<0.14.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
