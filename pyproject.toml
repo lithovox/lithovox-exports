@@ -1,0 +1,46 @@
+[project]
+name = "lithovox-exports"
+version = "0.1.0"
+description = "Exporteer LithoVox-corridormodellen (.nc) naar D-Stability, D-Geo Flow, XSLOPE, DXF, CSV, GLB, 3D Tiles en LAZ"
+readme = "README.md"
+authors = [
+    { name = "Rob van Putten", email = "breinbaas@pm.me" }
+]
+requires-python = ">=3.12"
+keywords = ["geotechniek", "voxelmodel", "d-stability", "d-geo flow", "xslope", "dxf", "ondergrond"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "d-geolib>=2.9.1",
+    "ezdxf>=1.4",
+    "h5py>=3.16.0",
+    "laspy[lazrs]>=2.7.0",
+    "matplotlib>=3.10",
+    "numpy>=2.3",
+    "openpyxl>=3.1",
+    "pyproj>=3.7",
+    "scipy>=1.16",
+    "shapely>=2.1",
+]
+
+[project.urls]
+Homepage = "https://www.lithovox.com"
+
+[project.scripts]
+lithovox-exports = "lithovox_exports.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.21,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29",
+    "nbclient>=0.10",
+    "nbformat>=5.10",
+    "pytest>=8.4",
+]
