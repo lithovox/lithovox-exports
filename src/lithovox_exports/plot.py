@@ -16,7 +16,7 @@ from .grid import chainage_label
 if TYPE_CHECKING:
     from .model import CrossSection, Model, SoilColumn
 
-# Rond getal voor de afstand tussen de stationeringslabels op de kaart.
+# Rond getal voor de afstand tussen de metreringslabels op de kaart.
 NICE_STEPS = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
 # Hooguit zoveel cellen langs en dwars op de lijn voor het maaiveld op de kaart.
 MAP_CELLS = (600, 120)
@@ -51,7 +51,7 @@ def plot_section(section: "CrossSection", ax=None, ground: bool = True, legend: 
     ax.autoscale_view()
     ax.set_xlabel("afstand tot de referentielijn [m] (positief = binnenwaarts)")
     ax.set_ylabel(f"hoogte [{section.crs.height_unit}]")
-    ax.set_title(f"{section.label} (stationering {section.slice.chainage:g} m)")
+    ax.set_title(f"{section.label} (metrering {section.slice.chainage:g} m)")
     ax.grid(True, linewidth=0.3, alpha=0.5)
     if legend:
         _legend(ax, section.soils, colors)
@@ -87,7 +87,7 @@ def _nice_step(length: float) -> float:
 
 def plot_map(model: "Model", ax=None, chainages: list[float] | None = None, ground: bool = True, step: float | None = None):
     """Bovenaanzicht van het model: de omtrek, de referentielijn met
-    stationeringen om de `step` m, met (`ground`) het maaiveld in kleur, en de
+    metreringen om de `step` m, met (`ground`) het maaiveld in kleur, en de
     dwarsdoorsneden op `chainages`."""
     ax = _axes(ax, (10, 8))
     grid = model.grid
@@ -109,7 +109,7 @@ def plot_map(model: "Model", ax=None, chainages: list[float] | None = None, grou
     outline = np.r_[outer, inner[::-1], outer[:1]]
     ax.plot(outline[:, 0], outline[:, 1], color="0.3", linewidth=1)
     ax.plot(grid.chainage_line[:, 0], grid.chainage_line[:, 1], color="k", linewidth=1.5, label="referentielijn")
-    # Stationeringen langs de lijn, aan de buitenkant van het model.
+    # Metreringen langs de lijn, aan de buitenkant van het model.
     step = step or _nice_step(model.length)
     marks = np.arange(0, model.length + 1e-9, step)
     x = np.interp(marks, grid.chainage, grid.station[:, 0])

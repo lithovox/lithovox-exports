@@ -52,7 +52,7 @@ class ProfileSlice:
 def _fill_left_out(f: h5py.File, section: ProfileSlice) -> None:
     """Vult de kolommen van `section` die het model weggelaten heeft (aan de
     binnenkant van een bocht, waar ze dichter bij de lijn op een andere
-    stationering liggen) met de modelkolom op hun plek: van de kolommen
+    metrering liggen) met de modelkolom op hun plek: van de kolommen
     waarvan de lijn haaks op de referentielijn binnen een halve voxellengte
     langs de plek gaat, de dichtstbijzijnde die niet weggelaten is."""
     source = np.asarray(f["source"][section.index], dtype=np.int32)

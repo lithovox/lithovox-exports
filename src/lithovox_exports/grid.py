@@ -83,7 +83,7 @@ def read_crs(f: h5py.File, metadata: dict) -> ModelCrs:
 @dataclass
 class CorridorGrid:
     """Het grid van een corridormodel, dat de referentielijn volgt: kolommen
-    op stationering s (langs de lijn) en afstand d (haaks erop, positief
+    op metrering s (langs de lijn) en afstand d (haaks erop, positief
     binnenwaarts), rijen op hoogte z. De kolom (i, j) staat op
 
         x = station_x[i] + d[j] * normal_x[i],  y = station_y[i] + d[j] * normal_y[i]
@@ -95,7 +95,7 @@ class CorridorGrid:
     # (n, 2) de punten van de referentielijn.
     chainage_line: np.ndarray
     outwards_side: str
-    # (ns,) stationering, (nd,) afstand van de kolommiddens; (nz,) hoogte van de rijmiddens.
+    # (ns,) metrering, (nd,) afstand van de kolommiddens; (nz,) hoogte van de rijmiddens.
     chainage: np.ndarray
     offset: np.ndarray
     z: np.ndarray

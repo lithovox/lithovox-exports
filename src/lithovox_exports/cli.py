@@ -28,7 +28,7 @@ def _info(model: Model) -> None:
 
 
 def _section(model: Model, args: argparse.Namespace) -> Path:
-    section = model.cross_section(args.stationering, args.smoothing)
+    section = model.cross_section(args.metrering, args.smoothing)
     path, suffix = args.uitvoer, args.uitvoer.suffix.lower()
     if suffix == ".stix":
         return section.to_dstability(path, args.grondsoorten)
@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
 
     section = commands.add_parser("doorsnede", help="een dwarsdoorsnede: " + ", ".join(SECTION_FORMATS))
     section.add_argument("model", type=Path)
-    section.add_argument("stationering", type=float, help="m langs de referentielijn")
+    section.add_argument("metrering", type=float, help="m langs de referentielijn")
     section.add_argument("uitvoer", type=Path)
     section.add_argument("--smoothing", type=float, default=SMOOTHING, help=f"in voxels (standaard {SMOOTHING})")
     section.add_argument("--grondsoorten", type=Path, help=".stix met grondsoorten en parameters")

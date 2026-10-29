@@ -35,11 +35,11 @@ def _soil_library(soils: str | Path | None, mapping: dict[str, str | None] | Non
 
 @dataclass
 class CrossSection:
-    """Een dwarsdoorsnede van een corridormodel bij één stationering, haaks op
+    """Een dwarsdoorsnede van een corridormodel bij één metrering, haaks op
     de referentielijn: grondpolygonen in (x, z) met x de afstand tot de
     referentielijn (m, positief binnenwaarts) en z de hoogte."""
 
-    # De gevraagde stationering (m); slice.chainage is die van de gebruikte kolom.
+    # De gevraagde metrering (m); slice.chainage is die van de gebruikte kolom.
     chainage: float
     slice: ProfileSlice
     polygons: list[SoilPolygon]
@@ -67,7 +67,7 @@ class CrossSection:
 
     def _check(self) -> None:
         if not self.polygons:
-            raise ValueError(f"Het model heeft geen voxels bij stationering {self.chainage:g} m")
+            raise ValueError(f"Het model heeft geen voxels bij metrering {self.chainage:g} m")
 
     def to_dstability(self, path: str | Path, soils: str | Path | None = None, mapping: dict[str, str | None] | None = None) -> Path:
         """Schrijft een D-Stability-model (.stix). Met `soils` (een .stix-bestand)
@@ -258,7 +258,7 @@ class Model:
             yield self.cross_section(float(chainage), smoothing)
 
     def locate(self, x: float, y: float) -> tuple[float, float]:
-        """De stationering en afstand tot de referentielijn (m) van de modelkolom
+        """De metrering en afstand tot de referentielijn (m) van de modelkolom
         op punt x, y (in het coördinatenstelsel van het model). ValueError als
         het punt buiten het model ligt."""
         grid = self.grid
@@ -278,7 +278,7 @@ class Model:
         raise ValueError(f"Het punt ({x:g}, {y:g}) ligt buiten het model")
 
     def soil_column(self, chainage: float, offset: float) -> SoilColumn:
-        """De grondkolom van het model bij stationering `chainage` en afstand
+        """De grondkolom van het model bij metrering `chainage` en afstand
         `offset` tot de referentielijn (m, positief binnenwaarts): de
         dichtstbijzijnde kolom van voxels."""
         grid = self.grid

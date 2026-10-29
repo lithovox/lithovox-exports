@@ -25,14 +25,14 @@ from lithovox_exports import Model
 model = Model("model.nc")
 print(model.name, model.length, model.crs, model.soils)
 
-# De dwarsdoorsnede bij stationering 250 m, als D-Stability-model
+# De dwarsdoorsnede bij metrering 250 m, als D-Stability-model
 doorsnede = model.cross_section(250)
 doorsnede.to_dstability("km0.250.stix")
 ```
 
 ## Het model
 
-Een corridormodel volgt een referentielijn: s is de stationering (m langs
+Een corridormodel volgt een referentielijn: s is de metrering (m langs
 de lijn), d de afstand tot de lijn (m, negatief buitenwaarts, positief
 binnenwaarts) en z de hoogte.
 
@@ -51,7 +51,7 @@ model.plot_map(chainages=[250, 500])   # kaart met de plekken van doorsneden
 ## Dwarsdoorsneden
 
 Een dwarsdoorsnede ligt haaks op de referentielijn, bij de modelkolom die
-het dichtst bij de gevraagde stationering ligt. De grenzen tussen
+het dichtst bij de gevraagde metrering ligt. De grenzen tussen
 grondsoorten worden uit de voxels opgespoord en gladgemaakt tot polygonen
 die hun punten precies met hun buren delen en geen gaten hebben (zoals
 D-Stability vereist).
@@ -100,7 +100,7 @@ Waterspanningen, belastingen, mesh en rekeninstellingen vul je altijd zelf in.
 ## Grondopbouw op een punt
 
 ```python
-kolom = model.soil_column(250, 10)          # stationering 250 m, 10 m binnenwaarts
+kolom = model.soil_column(250, 10)          # metrering 250 m, 10 m binnenwaarts
 kolom = model.soil_column_at(x, y)          # op wereldcoördinaten
 for laag in kolom.layers:
     print(laag.top, laag.bottom, laag.soil)
