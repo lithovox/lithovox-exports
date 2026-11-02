@@ -1,8 +1,8 @@
 # lithovox-exports
 
 Zet de voxelmodellen die LithoVox levert (corridormodellen, `.nc`) om naar
-invoer voor je eigen software: D-Stability, D-Geo Flow, XSLOPE, DXF en CSV
-per dwarsdoorsnede, en GLB, 3D Tiles en LAZ voor het hele model. Daarnaast
+invoer voor je eigen software: D-Stability, XSLOPE, DXF en CSV per
+dwarsdoorsnede, en GLB, 3D Tiles en LAZ voor het hele model. Daarnaast
 maakt het pakket figuren (kaart, doorsnede, grondkolom) en geeft het de
 grondopbouw op elk punt als een virtuele boring.
 
@@ -61,7 +61,6 @@ doorsnede = model.cross_section(250)                # gladgemaakte grenzen
 trap = model.cross_section(250, smoothing=0)        # de trap van de voxels
 
 doorsnede.to_dstability("km0.250.stix")   # D-Stability
-doorsnede.to_dgeoflow("km0.250.flox")     # D-Geo Flow
 doorsnede.to_xslope("km0.250.zip")        # XSLOPE: .xlsx + kleuren, gezipt
 doorsnede.to_xslope("km0.250.xlsx")       # of de .xlsx met *_styles.json ernaast
 doorsnede.to_dxf("km0.250.dxf")           # DXF (GEO5, CAD)
@@ -93,6 +92,19 @@ doorsnede.to_dstability(
 )
 doorsnede.to_xslope("km0.250.zip", soils="mijn_grondsoorten.stix", mapping={"hollandveen": "VEEN"})
 ```
+
+Heb je de grondsoorten van het model in **LithoVox Soils** gekoppeld, geef dan
+het `.lvs`-bestand (LithoVox soils) mee dat het schrijft. Daarin staan de
+koppeling en de parameters samen, dus `mapping` is niet nodig (geef je die
+toch, dan vult hij de koppeling aan of vervangt hij delen ervan):
+
+```python
+doorsnede.to_dstability("km0.250.stix", soils="reflijn_kruin.lvs")
+```
+
+Is het `.lvs` gemaakt voor een ander model, of een andere versie ervan (het
+bestand noemt wanneer LithoVox het model maakte en de controlesom van het
+`.nc`), dan krijg je een waarschuwing.
 
 XSLOPE-materialen krijgen de volumegewichten en, bij Mohr-Coulomb, c en phi.
 Waterspanningen, belastingen, mesh en rekeninstellingen vul je altijd zelf in.
@@ -139,12 +151,13 @@ modellen passen in het geheugen.
 ```
 lithovox-exports info model.nc
 lithovox-exports doorsnede model.nc 250 km0.250.stix --grondsoorten mijn_grondsoorten.stix
+lithovox-exports doorsnede model.nc 250 km0.250.stix --grondsoorten reflijn_kruin.lvs
 lithovox-exports model model.nc model.laz --breedte 2 --hoogte 0.5
 ```
 
-Het formaat volgt uit de extensie: `.stix`, `.flox`, `.xlsx`, `.zip`
-(XSLOPE), `.dxf`, `.csv` of `.png` voor een doorsnede; `.glb`, `.laz` of
-`.zip` (3D Tiles) voor het hele model.
+Het formaat volgt uit de extensie: `.stix`, `.xlsx`, `.zip` (XSLOPE),
+`.dxf`, `.csv` of `.png` voor een doorsnede; `.glb`, `.laz` of `.zip`
+(3D Tiles) voor het hele model.
 
 ## Meer
 

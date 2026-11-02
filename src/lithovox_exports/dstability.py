@@ -1,4 +1,4 @@
-"""Een dwarsdoorsnede als D-Stability-model (.stix), gemaakt met d-geolib:
+"""Een dwarsdoorsnede als D-Stability-model (.stix), gemaakt met lithovox-stability:
 de grondpolygonen van de doorsnede (zie profile.py) als lagen, elk met zijn
 grondsoort, gekleurd zoals in het model (zonder arcering). Zonder
 grondsoorten uit een .stix (zie read_stix_soils) hebben de grondsoorten
@@ -12,10 +12,14 @@ import re
 import tempfile
 from pathlib import Path
 
-from geolib.geometry.one import Point
-from geolib.models.dstability import DStabilityModel
-from geolib.models.dstability.internal import PersistableShadingTypeEnum, PersistableSoil, PersistableSoilVisualization
-from geolib.soils.soil import Soil
+from lithovox_stability.geometry.one import Point
+from lithovox_stability.models.dstability import DStabilityModel
+from lithovox_stability.models.dstability.internal import (
+    PersistableShadingTypeEnum,
+    PersistableSoil,
+    PersistableSoilVisualization,
+)
+from lithovox_stability.soils.soil import Soil
 
 from .profile import ProfileSlice, SoilPolygon
 
@@ -49,8 +53,14 @@ def read_stix_soils(data: bytes) -> dict:
         try:
             model.parse(path)
         except Exception as e:
-            raise ValueError(f"Dit is geen D-Stability-bestand dat d-geolib kan lezen: {e}") from e
-    return {"soils": [soil.model_dump(mode="json") for soil in model.datastructure.soils.Soils]}
+            raise ValueError(
+                f"Dit is geen D-Stability-bestand dat lithovox-stability kan lezen: {e}"
+            ) from e
+    return {
+        "soils": [
+            soil.model_dump(mode="json") for soil in model.datastructure.soils.Soils
+        ]
+    }
 
 
 def _add_soil_library(model: DStabilityModel, library: dict) -> list[PersistableSoil]:
@@ -72,20 +82,31 @@ def library_soils(soils: list[PersistableSoil], mapping: dict[str, str | None] |
     by_code = {soil.Code: soil for soil in reversed(soils) if soil.Code}
     codes = {soil_key(soil.Code): soil for soil in reversed(soils)}
     names = {soil_key(soil.Name): soil for soil in reversed(soils)}
-    known = {**{k: v for k, v in names.items() if k}, **{k: v for k, v in codes.items() if k}}
+    known = {
+        **{k: v for k, v in names.items() if k},
+        **{k: v for k, v in codes.items() if k},
+    }
 
     def find(name: str) -> PersistableSoil | None:
         if mapping is not None and name in mapping:
             code = mapping[name]
             if code and code not in by_code:
-                raise ValueError(f'grondsoort "{name}" is gekoppeld aan "{code}", maar die staat niet in de grondsoorten')
+                raise ValueError(
+                    f'grondsoort "{name}" is gekoppeld aan "{code}", maar die staat niet in de grondsoorten'
+                )
             return by_code[code] if code else None
         return known.get(soil_key(name))
 
     return find
 
 
-def write_stix(section: ProfileSlice, polygons: list[SoilPolygon], path: Path, label: str = "", library: dict | None = None) -> None:
+def write_stix(
+    section: ProfileSlice,
+    polygons: list[SoilPolygon],
+    path: Path,
+    label: str = "",
+    library: dict | None = None,
+) -> None:
     """Schrijft `polygons` (x = afstand tot de referentielijn, positief
     binnenwaarts; z = hoogte) als D-Stability-model naar `path`; met `library`
     (grondsoorten zoals read_stix_soils ze geeft) gaan al zijn grondsoorten
@@ -96,7 +117,10 @@ def write_stix(section: ProfileSlice, polygons: list[SoilPolygon], path: Path, l
     # Alleen de grondsoorten van de doorsnede (en de bibliotheek): niet de standaardgrondsoorten van D-Stability.
     model.datastructure.soils.Soils = []
     model.datastructure.soilvisualizations.SoilVisualizations = []
-    find = library_soils(_add_soil_library(model, library) if library else [], (library or {}).get("mapping"))
+    find = library_soils(
+        _add_soil_library(model, library) if library else [],
+        (library or {}).get("mapping"),
+    )
     codes: dict[int, str] = {}
     coloured: set[str] = set()
     for soil in sorted({p.soil for p in polygons}):
@@ -119,10 +143,16 @@ def write_stix(section: ProfileSlice, polygons: list[SoilPolygon], path: Path, l
         if color and soil_id not in coloured:
             coloured.add(soil_id)
             model.datastructure.soilvisualizations.SoilVisualizations.append(
-                PersistableSoilVisualization(Color=color, PersistableShadingType=PersistableShadingTypeEnum.NONE, SoilId=soil_id)
+                PersistableSoilVisualization(
+                    Color=color,
+                    PersistableShadingType=PersistableShadingTypeEnum.NONE,
+                    SoilId=soil_id,
+                )
             )
     for polygon in polygons:
-        points = [Point(x=round(x, DECIMALS), z=round(z, DECIMALS)) for x, z in polygon.points]
+        points = [
+            Point(x=round(x, DECIMALS), z=round(z, DECIMALS)) for x, z in polygon.points
+        ]
         model.add_layer(points, codes[polygon.soil], label=section.soils[polygon.soil])
     if label:
         model.datastructure.scenarios[0].Label = label

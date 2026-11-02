@@ -10,7 +10,7 @@ import zipfile
 from pathlib import Path
 
 import openpyxl
-from geolib.models.dstability.internal import PersistableSoil
+from lithovox_stability.models.dstability.internal import PersistableSoil
 from openpyxl.utils import get_column_letter
 
 from .dstability import library_soils
@@ -24,13 +24,24 @@ MOHR_COULOMB = {
     "MohrCoulombClassic": "MohrCoulombClassicShearStrengthModel",
 }
 # De rijen van een polygoonblok op het blad 'polygon' van het sjabloon.
-HEADER_ROW, TYPE_ROW, MAT_ID_ROW, NAME_ROW, SIZE_ROW, XY_ROW, FIRST_VERTEX_ROW = 4, 5, 6, 7, 8, 9, 10
+HEADER_ROW, TYPE_ROW, MAT_ID_ROW, NAME_ROW, SIZE_ROW, XY_ROW, FIRST_VERTEX_ROW = (
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+)
 
 
 def _properties(soil: PersistableSoil) -> dict[str, object]:
     """De kolommen van het blad 'mat' voor een D-Stability-grondsoort (0 betekent daar: niet ingevuld)."""
     props: dict[str, object] = {}
-    above, below = soil.VolumetricWeightAbovePhreaticLevel, soil.VolumetricWeightBelowPhreaticLevel
+    above, below = (
+        soil.VolumetricWeightAbovePhreaticLevel,
+        soil.VolumetricWeightBelowPhreaticLevel,
+    )
     if above > 0:
         props["g"] = above
     # XSLOPE weigert een verzadigd gewicht onder het droge.
@@ -45,7 +56,9 @@ def _properties(soil: PersistableSoil) -> dict[str, object]:
     return props
 
 
-def _materials(section: ProfileSlice, polygons: list[SoilPolygon], library: dict | None) -> tuple[list[tuple[str, dict, str | None]], dict[int, int]]:
+def _materials(
+    section: ProfileSlice, polygons: list[SoilPolygon], library: dict | None
+) -> tuple[list[tuple[str, dict, str | None]], dict[int, int]]:
     """De materialen (naam, kolommen van 'mat' en de modelkleur van de eerste
     grondsoort die het materiaal heeft) en het materiaalnummer (vanaf 1) van
     elke grondsoort."""
@@ -60,7 +73,11 @@ def _materials(section: ProfileSlice, polygons: list[SoilPolygon], library: dict
         key = ("stix", id(stix)) if stix is not None else ("model", soil)
         if key not in ids:
             color = section.colors.get(name)
-            materials.append((stix.Name or stix.Code, _properties(stix), color) if stix is not None else (name, {}, color))
+            materials.append(
+                (stix.Name or stix.Code, _properties(stix), color)
+                if stix is not None
+                else (name, {}, color)
+            )
             ids[key] = len(materials)
         material_of[soil] = ids[key]
     return materials, material_of
@@ -113,7 +130,13 @@ def _add_block(ws, n: int) -> None:
             validation.add(f"{col}{TYPE_ROW}")
 
 
-def write_xslope_zip(section: ProfileSlice, polygons: list[SoilPolygon], path: Path, label: str = "", library: dict | None = None) -> None:
+def write_xslope_zip(
+    section: ProfileSlice,
+    polygons: list[SoilPolygon],
+    path: Path,
+    label: str = "",
+    library: dict | None = None,
+) -> None:
     """Schrijft het XSLOPE-invoerbestand (zie write_xslope) en zijn stijlen (de
     kleuren van de grondsoorten, die XSLOPE ernaast bewaart) in een zip naar
     `path`, genoemd naar de zip: `<naam>.xlsx` en `<naam>_styles.json`, om
@@ -126,7 +149,13 @@ def write_xslope_zip(section: ProfileSlice, polygons: list[SoilPolygon], path: P
                 archive.write(file, file.name)
 
 
-def write_xslope(section: ProfileSlice, polygons: list[SoilPolygon], path: Path, label: str = "", library: dict | None = None) -> None:
+def write_xslope(
+    section: ProfileSlice,
+    polygons: list[SoilPolygon],
+    path: Path,
+    label: str = "",
+    library: dict | None = None,
+) -> None:
     """Schrijft `polygons` (x = afstand tot de referentielijn, positief
     binnenwaarts; z = hoogte) als XSLOPE-invoerbestand naar `path`, en de
     kleuren van de materialen naar `<path stem>_styles.json` ernaast; met
@@ -134,7 +163,9 @@ def write_xslope(section: ProfileSlice, polygons: list[SoilPolygon], path: Path,
     `mapping`) krijgen de materialen de parameters van de grondsoorten die
     eraan gekoppeld zijn. `label` wordt niet gebruikt (het staat in de bestandsnaam)."""
     materials, material_of = _materials(section, polygons, library)
-    path.with_name(f"{path.stem}_styles.json").write_text(json.dumps(_styles(materials), indent=2), encoding="utf-8")
+    path.with_name(f"{path.stem}_styles.json").write_text(
+        json.dumps(_styles(materials), indent=2), encoding="utf-8"
+    )
     wb = openpyxl.load_workbook(TEMPLATE)
 
     # SI (het sjabloon staat op Imperial); geen tijdseenheid (geen tijdsafhankelijke grondwaterstroming).
@@ -147,7 +178,8 @@ def write_xslope(section: ProfileSlice, polygons: list[SoilPolygon], path: Path,
     header_row = next(
         r
         for r in range(1, 30)
-        if str(mat.cell(r, 1).value).strip().lower() == "mat" and str(mat.cell(r, 2).value).strip().lower() == "name"
+        if str(mat.cell(r, 1).value).strip().lower() == "mat"
+        and str(mat.cell(r, 2).value).strip().lower() == "name"
     )
     columns = {
         str(cell.value).strip().replace("_", ""): cell.column

@@ -7,8 +7,7 @@ import h5py
 import laspy
 import openpyxl
 import pytest
-from geolib.models.dgeoflow import DGeoFlowModel
-from geolib.models.dstability import DStabilityModel
+from lithovox_stability.models.dstability import DStabilityModel
 
 from lithovox_exports import Model
 from lithovox_exports.cli import main
@@ -65,21 +64,36 @@ class TestCrossSection:
         assert y0 == pytest.approx(400005.0) and y1 == pytest.approx(399985.0)
 
     def test_series(self, model):
-        assert [s.label for s in model.cross_sections(10)] == ["km0.000", "km0.010", "km0.020", "km0.030"]
+        assert [s.label for s in model.cross_sections(10)] == [
+            "km0.000",
+            "km0.010",
+            "km0.020",
+            "km0.030",
+        ]
 
     def test_dstability(self, section, tmp_path):
         path = section.to_dstability(tmp_path / "section.stix")
         stix = DStabilityModel()
         stix.parse(path)
-        assert {soil.Code for soil in stix.datastructure.soils.Soils} == {"zand", "klei", "veen"}
+        assert {soil.Code for soil in stix.datastructure.soils.Soils} == {
+            "zand",
+            "klei",
+            "veen",
+        }
         assert len(stix.datastructure.geometries[0].Layers) == len(section.polygons)
 
     def test_dstability_with_soils(self, section, tmp_path):
         library = section.to_dstability(tmp_path / "library.stix")
-        path = section.to_dstability(tmp_path / "section.stix", soils=library, mapping={"zand": "klei", "veen": "klei"})
+        path = section.to_dstability(
+            tmp_path / "section.stix",
+            soils=library,
+            mapping={"zand": "klei", "veen": "klei"},
+        )
         stix = DStabilityModel()
         stix.parse(path)
-        clay = {soil.Id for soil in stix.datastructure.soils.Soils if soil.Code == "klei"}
+        clay = {
+            soil.Id for soil in stix.datastructure.soils.Soils if soil.Code == "klei"
+        }
         used = {layer.SoilId for layer in stix.datastructure.soillayers[0].SoilLayers}
         assert used <= clay
 
@@ -87,25 +101,95 @@ class TestCrossSection:
         with pytest.raises(ValueError):
             section.to_dstability(tmp_path / "section.stix", mapping={"zand": "klei"})
 
-    def test_dgeoflow(self, section, tmp_path):
-        flox = DGeoFlowModel()
-        flox.parse(section.to_dgeoflow(tmp_path / "section.flox"))
-        assert {soil.Code for soil in flox.datastructure.soils.Soils} == {"zand", "klei", "veen"}
+    def lvs(self, section, model, tmp_path, **made_for) -> "Path":
+        """Een .lvs zoals LithoVox Soils het schrijft: zand en klei gekoppeld
+        aan de bibliotheekgrondsoort "klei", veen aan geen."""
+        from lithovox_exports.dstability import read_stix_soils
+
+        library = read_stix_soils(section.to_dstability(tmp_path / "library.stix").read_bytes())
+        clay = next(s for s in library["soils"] if s["Code"] == "klei")
+        clay["VolumetricWeightAbovePhreaticLevel"] = 15.5
+        path = tmp_path / "model.lvs"
+        path.write_text(json.dumps({
+            "format": "lithovox-soils",
+            "version": 1,
+            "model": {"file": "model.nc", "created": model.created, "sha256": model.sha256, **made_for},
+            "soils": [
+                {"soil": "zand", "code": "klei", "dstability": clay},
+                {"soil": "klei", "code": "klei", "dstability": clay},
+                {"soil": "veen", "code": None, "dstability": None},
+            ],
+        }), encoding="utf-8")
+        return path
+
+    def soils_of_layers(self, path) -> dict[str, str]:
+        stix = DStabilityModel()
+        stix.parse(path)
+        by_id = {s.Id: s for s in stix.datastructure.soils.Soils}
+        layers = {layer.Id: by_id[sl.SoilId] for sl in stix.datastructure.soillayers[0].SoilLayers
+                  for layer in stix.datastructure.geometries[0].Layers if layer.Id == sl.LayerId}
+        return {layer.Label: layers[layer.Id] for layer in stix.datastructure.geometries[0].Layers}
+
+    def test_dstability_with_lvs(self, section, model, tmp_path, recwarn):
+        path = section.to_dstability(tmp_path / "section.stix", soils=self.lvs(section, model, tmp_path))
+        assert not [w for w in recwarn if "lvs" in str(w.message)]
+        soils = self.soils_of_layers(path)
+        assert soils["zand"].Code == soils["klei"].Code == "klei"
+        assert soils["zand"].VolumetricWeightAbovePhreaticLevel == 15.5
+        assert soils["veen"].Code == "veen"  # gekoppeld aan geen: alleen de naam
+
+    def test_lvs_with_mapping(self, section, model, tmp_path):
+        lvs = self.lvs(section, model, tmp_path)
+        path = section.to_dstability(tmp_path / "section.stix", soils=lvs, mapping={"veen": "klei"})
+        assert self.soils_of_layers(path)["veen"].Code == "klei"
+
+    def test_lvs_for_another_model_warns(self, section, model, tmp_path):
+        other = self.lvs(section, model, tmp_path, created="2020-01-01T00:00:00+00:00")
+        with pytest.warns(UserWarning, match="model.lvs is gemaakt voor model.nc"):
+            section.to_dstability(tmp_path / "a.stix", soils=other)
+        changed = self.lvs(section, model, tmp_path, sha256="0" * 64)
+        with pytest.warns(UserWarning, match="controlesom"):
+            section.to_dstability(tmp_path / "b.stix", soils=changed)
+
+    def test_xslope_with_lvs(self, section, model, tmp_path):
+        path = section.to_xslope(tmp_path / "section.xlsx", soils=self.lvs(section, model, tmp_path))
+        assert path.exists()
+
+    def test_not_an_lvs(self, section, tmp_path):
+        bad = tmp_path / "bad.lvs"
+        bad.write_text('{"format": "iets anders"}', encoding="utf-8")
+        with pytest.raises(ValueError, match="geen LithoVox-grondsoortenbestand"):
+            section.to_dstability(tmp_path / "section.stix", soils=bad)
+        newer = tmp_path / "newer.lvs"
+        newer.write_text('{"format": "lithovox-soils", "version": 2}', encoding="utf-8")
+        with pytest.raises(ValueError, match="versie 2"):
+            section.to_dstability(tmp_path / "section.stix", soils=newer)
 
     def test_xslope_xlsx(self, section, tmp_path):
         workbook = openpyxl.load_workbook(section.to_xslope(tmp_path / "section.xlsx"))
         assert "polygon" in workbook.sheetnames
-        styles = json.loads((tmp_path / "section_styles.json").read_text(encoding="utf-8"))
+        styles = json.loads(
+            (tmp_path / "section_styles.json").read_text(encoding="utf-8")
+        )
         assert styles["materials"]
 
     def test_xslope_zip(self, section, tmp_path):
         path = section.to_xslope(tmp_path / "section.zip")
-        assert sorted(zipfile.ZipFile(path).namelist()) == ["section.xlsx", "section_styles.json"]
+        assert sorted(zipfile.ZipFile(path).namelist()) == [
+            "section.xlsx",
+            "section_styles.json",
+        ]
 
     def test_dxf(self, section, tmp_path):
         doc = ezdxf.readfile(section.to_dxf(tmp_path / "section.dxf"))
         layers = {layer.dxf.name for layer in doc.layers}
-        assert {"INTERFACES", "OUTLINE", "SOIL_zand", "SOIL_klei", "SOIL_veen"} <= layers
+        assert {
+            "INTERFACES",
+            "OUTLINE",
+            "SOIL_zand",
+            "SOIL_klei",
+            "SOIL_veen",
+        } <= layers
 
     def test_csv(self, section, tmp_path):
         with section.to_csv(tmp_path / "section.csv").open(encoding="utf-8") as file:
@@ -121,14 +205,21 @@ class TestCrossSection:
 class TestSoilColumn:
     def test_layers(self, model):
         column = model.soil_column(15, 2.5)
-        assert [layer.soil for layer in column.layers] == ["klei", "veen", "klei", "zand"]
+        assert [layer.soil for layer in column.layers] == [
+            "klei",
+            "veen",
+            "klei",
+            "zand",
+        ]
         assert column.top == pytest.approx(1.0)
         assert column.layers[-1].bottom == pytest.approx(-8.0)
         assert column.ground == pytest.approx(1.0)
 
     def test_locate(self, model):
         column = model.soil_column(15, 2.5)
-        assert model.locate(column.x, column.y) == pytest.approx((column.chainage, column.offset))
+        assert model.locate(column.x, column.y) == pytest.approx(
+            (column.chainage, column.offset)
+        )
         assert model.soil_column_at(column.x, column.y).layers == column.layers
 
     def test_outside(self, model):

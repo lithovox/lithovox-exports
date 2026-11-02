@@ -5,7 +5,9 @@ plek). Elke export is een `to_*`-methode die het geschreven pad teruggeeft."""
 import csv
 import shutil
 import tempfile
-from dataclasses import dataclass
+import warnings
+from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 from typing import Iterator
 
@@ -13,24 +15,60 @@ import h5py
 import numpy as np
 
 from .convert import model_to_glb, model_to_laz, model_to_tiles
-from .dgeoflow import write_flox
 from .dstability import read_stix_soils, write_stix
 from .dxf import write_dxf
 from .grid import ModelCrs, chainage_label, read_grid, read_metadata
+from .lvs import read_lvs, sha256
 from .profile import SMOOTHING, ProfileSlice, SoilPolygon, read_slice, section_polygons
 from .xslope import write_xslope, write_xslope_zip
 
 
-def _soil_library(soils: str | Path | None, mapping: dict[str, str | None] | None) -> dict | None:
-    """De grondsoorten van een D-Stability-bestand, met de koppeling."""
+def _soil_library(
+    soils: str | Path | None,
+    mapping: dict[str, str | None] | None,
+    model: "Model | None" = None,
+) -> dict | None:
+    """De grondsoorten van een D-Stability-bestand (.stix) of een
+    LithoVox-grondsoortenbestand (.lvs), met de koppeling. Bij een .lvs is
+    zijn koppeling de basis en vult `mapping` die aan of vervangt delen
+    ervan; is het voor een ander model (of een andere versie ervan) gemaakt
+    dan `model`, dan volgt een waarschuwing."""
     if soils is None:
         if mapping:
-            raise ValueError("Een koppeling van grondsoorten heeft het D-Stability-bestand met de grondsoorten nodig (soils=...)")
+            raise ValueError(
+                "Een koppeling van grondsoorten heeft het bestand met de grondsoorten nodig (soils=...)"
+            )
         return None
-    library = read_stix_soils(Path(soils).read_bytes())
+    soils = Path(soils)
+    if soils.suffix.lower() == ".lvs":
+        library = read_lvs(soils)
+        _check_lvs_model(soils, library.pop("model"), model)
+        library["mapping"].update(mapping or {})
+        return library
+    library = read_stix_soils(soils.read_bytes())
     if mapping is not None:
         library["mapping"] = dict(mapping)
     return library
+
+
+def _check_lvs_model(path: Path, made_for: dict, model: "Model | None") -> None:
+    """Waarschuwt als een .lvs voor een ander model is gemaakt: eerst op
+    wanneer LithoVox het model maakte, dan op de controlesom van het bestand."""
+    if model is None or not made_for:
+        return
+    created, checksum = made_for.get("created"), made_for.get("sha256")
+    if created and model.created and created != model.created:
+        reason = f"het model van {created}, dit model is van {model.created}"
+    elif checksum and checksum != model.sha256:
+        reason = "een ander modelbestand (de controlesom verschilt)"
+    else:
+        return
+    warnings.warn(
+        f"{path.name} is gemaakt voor {made_for.get('file') or 'een ander model'} "
+        f"({reason}); de koppeling van de grondsoorten past misschien niet",
+        UserWarning,
+        stacklevel=4,
+    )
 
 
 @dataclass
@@ -44,10 +82,12 @@ class CrossSection:
     slice: ProfileSlice
     polygons: list[SoilPolygon]
     crs: ModelCrs
+    # Het model waar de doorsnede uit komt (om een .lvs mee te controleren).
+    model: "Model | None" = field(default=None, repr=False, compare=False)
 
     @property
     def label(self) -> str:
-        """Bijvoorbeeld "km0.250": de naam van het scenario in D-Stability en D-Geo Flow."""
+        """Bijvoorbeeld "km0.250": de naam van het scenario in D-Stability."""
         return chainage_label(self.chainage)
 
     @property
@@ -67,28 +107,38 @@ class CrossSection:
 
     def _check(self) -> None:
         if not self.polygons:
-            raise ValueError(f"Het model heeft geen voxels bij metrering {self.chainage:g} m")
+            raise ValueError(
+                f"Het model heeft geen voxels bij metrering {self.chainage:g} m"
+            )
 
-    def to_dstability(self, path: str | Path, soils: str | Path | None = None, mapping: dict[str, str | None] | None = None) -> Path:
+    def to_dstability(
+        self,
+        path: str | Path,
+        soils: str | Path | None = None,
+        mapping: dict[str, str | None] | None = None,
+    ) -> Path:
         """Schrijft een D-Stability-model (.stix). Met `soils` (een .stix-bestand)
         gaan al zijn grondsoorten met hun parameters erin, en krijgt elke
         modelgrondsoort de grondsoort die `mapping` op code noemt
         (modelgrondsoort → code; None: geen), of anders die met dezelfde
-        code of naam. Water, belastingen en rekeninstellingen vul je zelf in."""
+        code of naam. `soils` kan ook een LithoVox-grondsoortenbestand (.lvs,
+        van LithoVox Soils) zijn: dat geeft de grondsoorten en de koppeling
+        samen; `mapping` vult die dan aan of vervangt delen ervan. Een .lvs
+        voor een ander model (of een andere versie ervan) geeft een
+        waarschuwing. Water, belastingen en rekeninstellingen vul je zelf in."""
         self._check()
         path = Path(path)
-        write_stix(self.slice, self.polygons, path, self.label, _soil_library(soils, mapping))
+        write_stix(
+            self.slice, self.polygons, path, self.label, _soil_library(soils, mapping, self.model)
+        )
         return path
 
-    def to_dgeoflow(self, path: str | Path) -> Path:
-        """Schrijft een D-Geo Flow-model (.flox): de lagen en grondsoorten (alleen
-        namen). Randvoorwaarden, mesh en rekeninstellingen vul je zelf in."""
-        self._check()
-        path = Path(path)
-        write_flox(self.slice, self.polygons, path, self.label)
-        return path
-
-    def to_xslope(self, path: str | Path, soils: str | Path | None = None, mapping: dict[str, str | None] | None = None) -> Path:
+    def to_xslope(
+        self,
+        path: str | Path,
+        soils: str | Path | None = None,
+        mapping: dict[str, str | None] | None = None,
+    ) -> Path:
         """Schrijft een XSLOPE-invoerbestand. Een `.xlsx`-pad krijgt het
         werkboek en `<naam>_styles.json` (de kleuren, die XSLOPE Studio leest)
         ernaast; een `.zip`-pad krijgt beide in één zip. `soils` en `mapping`
@@ -97,7 +147,9 @@ class CrossSection:
         self._check()
         path = Path(path)
         write = write_xslope_zip if path.suffix.lower() == ".zip" else write_xslope
-        write(self.slice, self.polygons, path, self.label, _soil_library(soils, mapping))
+        write(
+            self.slice, self.polygons, path, self.label, _soil_library(soils, mapping, self.model)
+        )
         return path
 
     def to_dxf(self, path: str | Path) -> Path:
@@ -119,10 +171,14 @@ class CrossSection:
             writer.writerow(["polygoon", "grondsoort", "punt", "x", "z"])
             for n, polygon in enumerate(self.polygons):
                 for i, (x, z) in enumerate(polygon.points):
-                    writer.writerow([n, self.slice.soils[polygon.soil], i, round(x, 3), round(z, 3)])
+                    writer.writerow(
+                        [n, self.slice.soils[polygon.soil], i, round(x, 3), round(z, 3)]
+                    )
         return path
 
-    def plot(self, ax=None, ground: bool = True, legend: bool = True, edges: bool = True):
+    def plot(
+        self, ax=None, ground: bool = True, legend: bool = True, edges: bool = True
+    ):
         """Tekent de doorsnede met matplotlib (zie plot.plot_section); geeft de `ax`."""
         from .plot import plot_section
 
@@ -186,6 +242,11 @@ class Model:
         """De naam van de referentielijn van het model."""
         return self.metadata.get("name", "")
 
+    @cached_property
+    def sha256(self) -> str:
+        """De controlesom van het modelbestand (zoals een .lvs die noemt)."""
+        return sha256(self.path)
+
     @property
     def project(self) -> str:
         return self.metadata.get("project", "")
@@ -242,15 +303,29 @@ class Model:
         z = self.grid.z_edges()
         return float(z[0]), float(z[-1])
 
-    def cross_section(self, chainage: float, smoothing: float = SMOOTHING) -> CrossSection:
+    def cross_section(
+        self, chainage: float, smoothing: float = SMOOTHING
+    ) -> CrossSection:
         """De dwarsdoorsnede bij de kolom die het dichtst bij `chainage` ligt (m
         langs de referentielijn). `smoothing` (in voxels) maakt de grenzen
         tussen grondsoorten glad; 0 houdt de trap van de voxels."""
         with h5py.File(self.path, "r") as f:
             section = read_slice(f, chainage)
-        return CrossSection(chainage=chainage, slice=section, polygons=section_polygons(section, smoothing), crs=self.grid.crs)
+        return CrossSection(
+            chainage=chainage,
+            slice=section,
+            polygons=section_polygons(section, smoothing),
+            crs=self.grid.crs,
+            model=self,
+        )
 
-    def cross_sections(self, every: float, start: float = 0.0, stop: float | None = None, smoothing: float = SMOOTHING) -> Iterator[CrossSection]:
+    def cross_sections(
+        self,
+        every: float,
+        start: float = 0.0,
+        stop: float | None = None,
+        smoothing: float = SMOOTHING,
+    ) -> Iterator[CrossSection]:
         """Dwarsdoorsneden om de `every` m, van `start` tot en met `stop`
         (standaard: het eind van de lijn), een voor een gemaakt."""
         stop = self.length if stop is None else stop
@@ -271,10 +346,18 @@ class Model:
         with h5py.File(self.path, "r") as f:
             source = f["source"] if "source" in f else None
             for i in near[np.argsort(along[near])]:
-                j = int(np.clip(np.rint((offset[i] - grid.offset[0]) / grid.dd), 0, len(grid.offset) - 1))
+                j = int(
+                    np.clip(
+                        np.rint((offset[i] - grid.offset[0]) / grid.dd),
+                        0,
+                        len(grid.offset) - 1,
+                    )
+                )
                 # Aan de binnenkant van een bocht liet het model kolommen weg: dan de volgende.
                 if source is None or source[i, j] >= 0:
-                    return round(float(grid.chainage[i]), 3), round(float(grid.offset[j]), 3)
+                    return round(float(grid.chainage[i]), 3), round(
+                        float(grid.offset[j]), 3
+                    )
         raise ValueError(f"Het punt ({x:g}, {y:g}) ligt buiten het model")
 
     def soil_column(self, chainage: float, offset: float) -> SoilColumn:
@@ -284,9 +367,15 @@ class Model:
         grid = self.grid
         low, high = self.offsets
         if not low <= offset <= high:
-            raise ValueError(f"Afstand {offset:g} m ligt buiten het model ({low:g} tot {high:g} m)")
+            raise ValueError(
+                f"Afstand {offset:g} m ligt buiten het model ({low:g} tot {high:g} m)"
+            )
         i = int(np.argmin(np.abs(grid.chainage - chainage)))
-        j = int(np.clip(np.rint((offset - grid.offset[0]) / grid.dd), 0, len(grid.offset) - 1))
+        j = int(
+            np.clip(
+                np.rint((offset - grid.offset[0]) / grid.dd), 0, len(grid.offset) - 1
+            )
+        )
         with h5py.File(self.path, "r") as f:
             codes = np.asarray(f["soil"][i, j], dtype=np.int16)
             ground = float(f["ground"][i, j]) if "ground" in f else float("nan")
@@ -299,10 +388,18 @@ class Model:
             if code < 0:
                 continue
             name = grid.soils[code]
-            if layers and layers[-1].soil == name and abs(layers[-1].bottom - edges[k + 1]) < 1e-9:
+            if (
+                layers
+                and layers[-1].soil == name
+                and abs(layers[-1].bottom - edges[k + 1]) < 1e-9
+            ):
                 layers[-1].bottom = float(edges[k])
             else:
-                layers.append(SoilLayer(top=float(edges[k + 1]), bottom=float(edges[k]), soil=name))
+                layers.append(
+                    SoilLayer(
+                        top=float(edges[k + 1]), bottom=float(edges[k]), soil=name
+                    )
+                )
         x, y = grid.station[i] + grid.offset[j] * grid.normal[i]
         return SoilColumn(
             chainage=round(float(grid.chainage[i]), 3),
@@ -318,31 +415,63 @@ class Model:
         """De grondkolom van het model op punt x, y (zie locate)."""
         return self.soil_column(*self.locate(x, y))
 
-    def plot_map(self, ax=None, chainages: list[float] | None = None, ground: bool = True, step: float | None = None):
+    def plot_map(
+        self,
+        ax=None,
+        chainages: list[float] | None = None,
+        ground: bool = True,
+        step: float | None = None,
+    ):
         """Tekent het model van bovenaf met matplotlib (zie plot.plot_map); geeft de `ax`."""
         from .plot import plot_map
 
         return plot_map(self, ax, chainages, ground, step)
 
-    def to_glb(self, path: str | Path, voxel_width: float = 1.0, voxel_height: float = 0.2, voxel_edges: bool = False) -> Path:
+    def to_glb(
+        self,
+        path: str | Path,
+        voxel_width: float = 1.0,
+        voxel_height: float = 0.2,
+        voxel_edges: bool = False,
+    ) -> Path:
         """Schrijft het model als 3D-mesh (GLB), met voxels van ongeveer
         `voxel_width` x `voxel_height` m; in lokale meters rond een oorsprong
         (die staat in de extras van de GLB). `voxel_edges` tekent de randen van
         elke voxel donkerder."""
         path = Path(path)
-        path.write_bytes(model_to_glb(self.path, voxel_width, voxel_height, False, voxel_edges))
+        path.write_bytes(
+            model_to_glb(self.path, voxel_width, voxel_height, False, voxel_edges)
+        )
         return path
 
-    def to_tiles(self, path: str | Path, voxel_width: float = 1.0, voxel_height: float = 0.2, voxel_edges: bool = True) -> Path:
+    def to_tiles(
+        self,
+        path: str | Path,
+        voxel_width: float = 1.0,
+        voxel_height: float = 0.2,
+        voxel_edges: bool = True,
+    ) -> Path:
         """Schrijft het model als OGC 3D Tiles (een zip met 3d/tileset.json), op de
         wereldbol geplaatst, bijvoorbeeld voor Cesium of ArcGIS."""
         path = Path(path)
         with tempfile.TemporaryDirectory() as folder:
             # Verplaatst, niet hernoemd: de tijdelijke map kan op een andere schijf staan.
-            shutil.move(model_to_tiles(self.path, Path(folder), voxel_width, voxel_height, False, voxel_edges), path)
+            shutil.move(
+                model_to_tiles(
+                    self.path,
+                    Path(folder),
+                    voxel_width,
+                    voxel_height,
+                    False,
+                    voxel_edges,
+                ),
+                path,
+            )
         return path
 
-    def to_laz(self, path: str | Path, voxel_width: float = 1.0, voxel_height: float = 0.2) -> Path:
+    def to_laz(
+        self, path: str | Path, voxel_width: float = 1.0, voxel_height: float = 0.2
+    ) -> Path:
         """Schrijft het model als LAZ-puntenwolk (een punt per voxel, klasse 64 +
         code van de grondsoort), bijvoorbeeld voor QGIS of ArcGIS."""
         path = Path(path)

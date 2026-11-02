@@ -8,7 +8,7 @@ from pathlib import Path
 from .model import Model
 from .profile import SMOOTHING
 
-SECTION_FORMATS = [".stix", ".flox", ".xlsx", ".zip", ".dxf", ".csv", ".png"]
+SECTION_FORMATS = [".stix", ".xlsx", ".zip", ".dxf", ".csv", ".png"]
 MODEL_FORMATS = [".glb", ".laz", ".zip"]
 
 
@@ -22,8 +22,12 @@ def _info(model: Model) -> None:
     print(f"lengte          {model.length:.1f} m")
     print(f"breedte         {low:g} tot {high:g} m")
     print(f"hoogte          {bottom:g} tot {top:g} {model.grid.crs.height_unit}")
-    print(f"voxels          {' x '.join(map(str, model.shape))} ({ds:g} x {dd:g} x {dz:g} m)")
-    print(f"crs             {model.crs}, verticaal: {model.vertical_datum or 'onbekend'}")
+    print(
+        f"voxels          {' x '.join(map(str, model.shape))} ({ds:g} x {dd:g} x {dz:g} m)"
+    )
+    print(
+        f"crs             {model.crs}, verticaal: {model.vertical_datum or 'onbekend'}"
+    )
     print(f"grondsoorten    {', '.join(model.soils)}")
 
 
@@ -32,8 +36,6 @@ def _section(model: Model, args: argparse.Namespace) -> Path:
     path, suffix = args.uitvoer, args.uitvoer.suffix.lower()
     if suffix == ".stix":
         return section.to_dstability(path, args.grondsoorten)
-    if suffix == ".flox":
-        return section.to_dgeoflow(path)
     if suffix in (".xlsx", ".zip"):
         return section.to_xslope(path, args.grondsoorten)
     if suffix == ".dxf":
@@ -55,24 +57,42 @@ def _whole(model: Model, args: argparse.Namespace) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="lithovox-exports", description="Exports van LithoVox-corridormodellen (.nc)")
+    parser = argparse.ArgumentParser(
+        prog="lithovox-exports",
+        description="Exports van LithoVox-corridormodellen (.nc)",
+    )
     commands = parser.add_subparsers(dest="opdracht", required=True)
 
     info = commands.add_parser("info", help="eigenschappen van het model")
     info.add_argument("model", type=Path)
 
-    section = commands.add_parser("doorsnede", help="een dwarsdoorsnede: " + ", ".join(SECTION_FORMATS))
+    section = commands.add_parser(
+        "doorsnede", help="een dwarsdoorsnede: " + ", ".join(SECTION_FORMATS)
+    )
     section.add_argument("model", type=Path)
     section.add_argument("metrering", type=float, help="m langs de referentielijn")
     section.add_argument("uitvoer", type=Path)
-    section.add_argument("--smoothing", type=float, default=SMOOTHING, help=f"in voxels (standaard {SMOOTHING})")
-    section.add_argument("--grondsoorten", type=Path, help=".stix met grondsoorten en parameters")
+    section.add_argument(
+        "--smoothing",
+        type=float,
+        default=SMOOTHING,
+        help=f"in voxels (standaard {SMOOTHING})",
+    )
+    section.add_argument(
+        "--grondsoorten", type=Path, help=".stix met grondsoorten en parameters, of .lvs (LithoVox Soils) met ook de koppeling"
+    )
 
-    whole = commands.add_parser("model", help="het hele model: .glb, .laz, .zip (3D Tiles)")
+    whole = commands.add_parser(
+        "model", help="het hele model: .glb, .laz, .zip (3D Tiles)"
+    )
     whole.add_argument("model", type=Path)
     whole.add_argument("uitvoer", type=Path)
-    whole.add_argument("--breedte", type=float, default=1.0, help="voxelbreedte in m (standaard 1.0)")
-    whole.add_argument("--hoogte", type=float, default=0.2, help="voxelhoogte in m (standaard 0.2)")
+    whole.add_argument(
+        "--breedte", type=float, default=1.0, help="voxelbreedte in m (standaard 1.0)"
+    )
+    whole.add_argument(
+        "--hoogte", type=float, default=0.2, help="voxelhoogte in m (standaard 0.2)"
+    )
 
     args = parser.parse_args(argv)
     try:
@@ -82,8 +102,14 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         formats = SECTION_FORMATS if args.opdracht == "doorsnede" else MODEL_FORMATS
         if args.uitvoer.suffix.lower() not in formats:
-            parser.error(f"onbekend formaat {args.uitvoer.suffix!r}, kies uit {', '.join(formats)}")
-        path = _section(model, args) if args.opdracht == "doorsnede" else _whole(model, args)
+            parser.error(
+                f"onbekend formaat {args.uitvoer.suffix!r}, kies uit {', '.join(formats)}"
+            )
+        path = (
+            _section(model, args)
+            if args.opdracht == "doorsnede"
+            else _whole(model, args)
+        )
     except (OSError, ValueError) as e:
         print(f"fout: {e}", file=sys.stderr)
         return 1
