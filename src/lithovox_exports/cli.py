@@ -43,9 +43,9 @@ def _section(model: Model, args: argparse.Namespace) -> Path:
     section = model.cross_section(args.metrering, args.smoothing)
     path, suffix = args.uitvoer, args.uitvoer.suffix.lower()
     if suffix == ".stix":
-        return section.to_dstability(path)
+        return section.to_dstability(path, args.koppelingen)
     if suffix in (".xlsx", ".zip"):
-        return section.to_xslope(path)
+        return section.to_xslope(path, args.koppelingen)
     if suffix == ".dxf":
         return section.to_dxf(path)
     if suffix == ".csv":
@@ -85,6 +85,12 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=SMOOTHING,
         help=f"in voxels (standaard {SMOOTHING})",
+    )
+    section.add_argument(
+        "--koppelingen",
+        type=Path,
+        help="het koppelbestand van LithoVox Stability (*.soil-links.json): "
+        "de D-Stability-grondsoorten met hun parameters (.stix, .xlsx, .zip)",
     )
 
     whole = commands.add_parser(

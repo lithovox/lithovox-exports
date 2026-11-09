@@ -77,29 +77,31 @@ for doorsnede in model.cross_sections(every=50):
 
 ### Grondsoorten met parameters (D-Stability, XSLOPE)
 
-De grondsoorten krijgen hun parameters uit het model zelf. In LithoVox koppel
-je op de pagina Grondsoorten elke grondsoortklasse van het model aan een
-grondsoort uit een voorbeeldbestand van D-Stability (`.stix`) of
-D-Settlement (`.sli`); het `.nc` bewaart dan de parameters van de
-gekoppelde grondsoorten (formaatversie 3, ondertekend met de voxels).
-`to_dstability` en `to_xslope` gebruiken de D-Stability-koppeling vanzelf:
+De D-Stability-grondsoorten koppel je in **LithoVox Stability**: elke
+grondsoort van het model aan een grondsoort uit een D-Stability-bestand
+(`.stix`), of aan geen. LithoVox Stability bewaart de koppelingen als een open
+**koppelbestand** (`*.soil-links.json`): de koppelingen, de parameters van de
+gekoppelde grondsoorten zoals in de `.stix`, en het model waar ze bij horen
+(zijn SHA-256). `to_dstability` en `to_xslope` nemen het als `soil_links`:
 
 ```python
-doorsnede.to_dstability("km0.250.stix")   # gekoppelde grondsoorten met hun parameters
-doorsnede.to_xslope("km0.250.zip")
+doorsnede.to_dstability("km0.250.stix", soil_links="dijk.soil-links.json")
+doorsnede.to_xslope("km0.250.zip", soil_links="dijk.soil-links.json")
 ```
 
-Een grondsoort die niet gekoppeld is, krijgt een grondsoort met alleen zijn
-naam. Wat gekoppeld is, lees je zo:
+Op de opdrachtregel: `lithovox-exports doorsnede dijk.nc 250 km0.250.stix
+--koppelingen dijk.soil-links.json`. Een koppelbestand van een ander model wordt
+geweigerd. Zonder koppelbestand, en voor een grondsoort die aan geen gekoppeld
+is, krijgt een grondsoort alleen zijn naam. LithoVox levert geen koppelingen
+mee: ze zijn van de gebruiker.
+
+Het model zelf kan parameters van D-Settlement-grondsoorten hebben (in LithoVox
+gekoppeld, formaatversie 3, ondertekend met de voxels):
 
 ```python
 model.soil_parameter_files                  # de voorbeeldbestanden: programma, bestand, ingelezen
-model.soil_parameters()                     # {"hollandveen": {"code": "VEEN", "name": ..., "parameters": {...}}, "basalton": None, ...}
-model.soil_parameters("d_settlement")       # D-Settlement: parameters als [sleutel, waarde]-paren
+model.soil_parameters("d_settlement")       # {"klei": {"code": ..., "parameters": [[sleutel, waarde], ...]}, ...}
 ```
-
-De parameters wijzig je in het rekenprogramma; lees het voorbeeldbestand
-daarna opnieuw in LithoVox in en exporteer het model opnieuw.
 
 XSLOPE-materialen krijgen de volumegewichten en, bij Mohr-Coulomb, c en phi.
 Waterspanningen, belastingen, mesh en rekeninstellingen vul je altijd zelf in.

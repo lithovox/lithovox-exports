@@ -1,6 +1,7 @@
 import csv
 import json
 import zipfile
+from pathlib import Path
 
 import ezdxf
 import h5py
@@ -147,18 +148,70 @@ class TestCrossSection:
         assert settlement["klei"]["parameters"] == [["SoilGamDry", "14.00"], ["SoilCp", "4.42E+01"]]
         assert settlement["zand"] is None and settlement["veen"] is None
 
-    def test_dstability_with_linked_parameters(self, section, tmp_path):
+    def soil_links(self, linked: Model, tmp_path, **changes) -> "Path":
+        """Een koppelbestand zoals LithoVox Stability het schrijft: de
+        D-Stability-koppeling van het testmodel, bij dat model."""
+        data = {
+            "format": "lithovox-soil-parameters",
+            "version": 1,
+            "model": {"file": linked.path.name, "sha256": linked.sha256},
+            "mappings": [
+                {"software": "d_stability", "label": "D-Stability", "file": "dijk.stix",
+                 "sha256": "ab" * 32, "loaded": "2026-11-09T12:00:00Z",
+                 "soils": list(linked._soil_parameters["mappings"][0]["soils"])},
+            ],
+            **changes,
+        }
+        path = tmp_path / "dijk.soil-links.json"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        return path
+
+    def test_dstability_with_soil_links(self, section, tmp_path):
         linked = self.linked_model(section, tmp_path)
-        path = linked.cross_section(15.0).to_dstability(tmp_path / "section.stix")
+        links = self.soil_links(linked, tmp_path)
+        path = linked.cross_section(15.0).to_dstability(tmp_path / "section.stix", soil_links=links)
         soils = self.soils_of_layers(path)
         assert soils["zand"].Code == soils["klei"].Code == "KLEI"
         assert soils["zand"].VolumetricWeightAbovePhreaticLevel == 15.5
         assert soils["veen"].Code == "veen"  # gekoppeld aan geen: alleen de naam
+        # De inhoud als dict werkt ook.
+        data = json.loads(links.read_text(encoding="utf-8"))
+        again = linked.cross_section(15.0).to_dstability(tmp_path / "again.stix", soil_links=data)
+        assert self.soils_of_layers(again)["zand"].Code == "KLEI"
 
-    def test_xslope_with_linked_parameters(self, section, tmp_path):
+    def test_without_soil_links_only_names(self, section, tmp_path):
+        # Een D-Stability-koppeling in het .nc telt niet meer: die is van LithoVox Stability.
         linked = self.linked_model(section, tmp_path)
-        path = linked.cross_section(15.0).to_xslope(tmp_path / "section.xlsx")
+        soils = self.soils_of_layers(linked.cross_section(15.0).to_dstability(tmp_path / "section.stix"))
+        assert soils["zand"].Code == "zand" and soils["klei"].Code == "klei"
+
+    def test_soil_links_of_another_model_or_unreadable(self, section, tmp_path):
+        linked = self.linked_model(section, tmp_path)
+        cut = linked.cross_section(15.0)
+        other = self.soil_links(linked, tmp_path, model={"file": "ander.nc", "sha256": "00" * 32})
+        with pytest.raises(ValueError, match="ander model"):
+            cut.to_dstability(tmp_path / "s.stix", soil_links=other)
+        with pytest.raises(ValueError, match="niet bij welk model"):
+            cut.to_dstability(tmp_path / "s.stix", soil_links=self.soil_links(linked, tmp_path, model=None))
+        with pytest.raises(ValueError, match="versie 2"):
+            cut.to_xslope(tmp_path / "s.xlsx", soil_links=self.soil_links(linked, tmp_path, version=2))
+        broken = tmp_path / "kapot.soil-links.json"
+        broken.write_text("{", encoding="utf-8")
+        with pytest.raises(ValueError, match="niet te lezen"):
+            cut.to_dstability(tmp_path / "s.stix", soil_links=broken)
+
+    def test_xslope_with_soil_links(self, section, tmp_path):
+        linked = self.linked_model(section, tmp_path)
+        links = self.soil_links(linked, tmp_path)
+        path = linked.cross_section(15.0).to_xslope(tmp_path / "section.xlsx", soil_links=links)
         assert path.exists()
+
+    def test_cli_takes_soil_links(self, section, tmp_path):
+        linked = self.linked_model(section, tmp_path)
+        links = self.soil_links(linked, tmp_path)
+        out = tmp_path / "cli.stix"
+        assert main(["doorsnede", str(linked.path), "15", str(out), "--koppelingen", str(links)]) == 0
+        assert self.soils_of_layers(out)["zand"].Code == "KLEI"
 
     def test_unreadable_soil_parameters(self, section, tmp_path):
         with pytest.raises(ValueError, match="onbekend formaat"):

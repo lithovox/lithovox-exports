@@ -24,9 +24,23 @@ zegt waarom: "none" met opzet, "suggested" een voorstel dat niet bevestigd
 is, "undecided" nog niet gekozen). De parameters staan erin zoals in het
 voorbeeldbestand: een D-Stability-grondsoort als zijn JSON-object, een
 D-Settlement-grondsoort als lijst van [sleutel, waarde]-paren (waarden als
-tekst). Het bedrijf ondertekent ze samen met de voxels."""
+tekst). Het bedrijf ondertekent ze samen met de voxels.
+
+Sinds november 2026 koppel je de D-Stability-grondsoorten in LithoVox
+Stability, niet meer in LithoVox: het `.nc` heeft dan alleen nog
+D-Settlement. LithoVox Stability bewaart de koppelingen als een open
+**koppelbestand** (`*.soil-links.json`): dezelfde JSON met één koppeling
+("d_stability") en het model waar ze bij horen:
+
+    {"format": "lithovox-soil-parameters", "version": 1,
+     "model": {"file": "dijk.nc", "sha256": "…"},
+     "mappings": [{"software": "d_stability", …, "soils": [...]}]}
+
+`to_dstability` en `to_xslope` nemen het als `soil_links`
+(read_soil_links leest en controleert het)."""
 
 import json
+from pathlib import Path
 
 import h5py
 
@@ -48,15 +62,40 @@ def read_soil_parameters(f: h5py.File) -> dict | None:
         data = json.loads(raw)
     except (TypeError, json.JSONDecodeError) as e:
         raise ValueError(f"De grondsoortparameters van het model zijn niet te lezen: {e}") from e
+    return _check(data, "De grondsoortparameters van het model")
+
+
+def _check(data, what: str) -> dict:
+    """`data` als grondsoortparameters gecontroleerd (formaat, versie,
+    koppelingen); ValueError met wat er mis is."""
     if not isinstance(data, dict) or data.get("format") != FORMAT:
-        raise ValueError("De grondsoortparameters van het model hebben een onbekend formaat")
+        raise ValueError(f"{what} hebben een onbekend formaat")
     if data.get("version") != VERSION:
-        raise ValueError(
-            f"De grondsoortparameters van het model hebben versie {data.get('version')}; "
-            f"dit pakket leest versie {VERSION}"
-        )
+        raise ValueError(f"{what} hebben versie {data.get('version')}; dit pakket leest versie {VERSION}")
     if not isinstance(data.get("mappings"), list):
-        raise ValueError("De grondsoortparameters van het model hebben geen koppelingen")
+        raise ValueError(f"{what} hebben geen koppelingen")
+    return data
+
+
+def read_soil_links(source: "str | Path | dict") -> dict:
+    """Een koppelbestand van LithoVox Stability (`*.soil-links.json`, een pad)
+    of de inhoud ervan (een dict), gelezen en gecontroleerd: formaat, versie,
+    een D-Stability-koppeling en het model waar het bij hoort. ValueError
+    als het niet te lezen is."""
+    if isinstance(source, dict):
+        data = source
+    else:
+        path = Path(source)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+            raise ValueError(f"Het koppelbestand {path.name} is niet te lezen: {e}") from e
+    _check(data, "De koppelingen")
+    if mapping_of(data, "d_stability") is None:
+        raise ValueError("Het koppelbestand heeft geen D-Stability-koppeling")
+    model = data.get("model")
+    if not isinstance(model, dict) or not isinstance(model.get("sha256"), str):
+        raise ValueError("Het koppelbestand zegt niet bij welk model het hoort")
     return data
 
 

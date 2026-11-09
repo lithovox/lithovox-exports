@@ -19,7 +19,7 @@ from .dstability import write_stix
 from .dxf import write_dxf
 from .grid import ModelCrs, chainage_label, read_grid, read_metadata
 from .profile import SMOOTHING, ProfileSlice, SoilPolygon, read_slice, section_polygons
-from .soil_parameters import dstability_library, mapping_of, read_soil_parameters
+from .soil_parameters import dstability_library, mapping_of, read_soil_links, read_soil_parameters
 from .xslope import write_xslope, write_xslope_zip
 
 
@@ -63,33 +63,42 @@ class CrossSection:
                 f"Het model heeft geen voxels bij metrering {self.chainage:g} m"
             )
 
-    def _library(self) -> dict | None:
-        """De D-Stability-grondsoorten die in LithoVox aan de grondsoorten
-        van het model gekoppeld zijn (zie soil_parameters), of None."""
-        return self.model._dstability_library() if self.model is not None else None
+    def _library(self, soil_links: "str | Path | dict | None") -> dict | None:
+        """De D-Stability-grondsoorten uit een koppelbestand van LithoVox
+        Stability (zie soil_parameters.read_soil_links), of None zonder.
+        ValueError als het bij een ander model hoort."""
+        if soil_links is None:
+            return None
+        data = read_soil_links(soil_links)
+        if self.model is not None and data["model"]["sha256"] != self.model.sha256:
+            raise ValueError(
+                f"Het koppelbestand hoort bij een ander model ({data['model'].get('file', '?')}), "
+                f"niet bij {self.model.path.name}: maak het opnieuw in LithoVox Stability"
+            )
+        return dstability_library(data)
 
-    def to_dstability(self, path: str | Path) -> Path:
-        """Schrijft een D-Stability-model (.stix). Elke grondsoort van het
-        model die in LithoVox aan een D-Stability-grondsoort gekoppeld is,
-        krijgt die grondsoort met al zijn parameters (zoals het model ze
-        bewaart, zie Model.soil_parameters); een niet gekoppelde grondsoort
-        krijgt een grondsoort met alleen zijn naam. Water, belastingen en
-        rekeninstellingen vul je zelf in."""
+    def to_dstability(self, path: str | Path, soil_links: "str | Path | dict | None" = None) -> Path:
+        """Schrijft een D-Stability-model (.stix). Met `soil_links` (het
+        koppelbestand van LithoVox Stability, of de inhoud ervan) krijgt elke
+        gekoppelde grondsoort de D-Stability-grondsoort met al zijn
+        parameters; een niet gekoppelde grondsoort (of alles, zonder
+        `soil_links`) krijgt een grondsoort met alleen zijn naam. Water,
+        belastingen en rekeninstellingen vul je zelf in."""
         self._check()
         path = Path(path)
-        write_stix(self.slice, self.polygons, path, self.label, self._library())
+        write_stix(self.slice, self.polygons, path, self.label, self._library(soil_links))
         return path
 
-    def to_xslope(self, path: str | Path) -> Path:
+    def to_xslope(self, path: str | Path, soil_links: "str | Path | dict | None" = None) -> Path:
         """Schrijft een XSLOPE-invoerbestand. Een `.xlsx`-pad krijgt het
         werkboek en `<naam>_styles.json` (de kleuren, die XSLOPE Studio leest)
-        ernaast; een `.zip`-pad krijgt beide in één zip. De materialen van de
-        grondsoorten die in LithoVox aan een D-Stability-grondsoort gekoppeld
-        zijn, krijgen de volumegewichten en, voor Mohr-Coulomb, c en phi."""
+        ernaast; een `.zip`-pad krijgt beide in één zip. Met `soil_links`
+        (zie to_dstability) krijgen de materialen van de gekoppelde
+        grondsoorten de volumegewichten en, voor Mohr-Coulomb, c en phi."""
         self._check()
         path = Path(path)
         write = write_xslope_zip if path.suffix.lower() == ".zip" else write_xslope
-        write(self.slice, self.polygons, path, self.label, self._library())
+        write(self.slice, self.polygons, path, self.label, self._library(soil_links))
         return path
 
     def to_dxf(self, path: str | Path) -> Path:
@@ -239,10 +248,6 @@ class Model:
                 else None
             )
         return out
-
-    def _dstability_library(self) -> dict | None:
-        """De gekoppelde D-Stability-grondsoorten als bibliotheek voor de exports."""
-        return dstability_library(self._soil_parameters)
 
     @property
     def colors(self) -> dict[str, str]:
