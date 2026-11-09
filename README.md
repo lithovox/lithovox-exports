@@ -75,36 +75,31 @@ for doorsnede in model.cross_sections(every=50):
     doorsnede.to_dstability(f"{doorsnede.label}.stix")   # km0.000.stix, km0.050.stix, ...
 ```
 
-### Eigen grondsoorten en parameters (D-Stability, XSLOPE)
+### Grondsoorten met parameters (D-Stability, XSLOPE)
 
-Standaard hebben de grondsoorten alleen een naam. Geef een
-D-Stability-bestand met je grondsoortenbibliotheek mee om die grondsoorten
-en parameters te gebruiken. Een modelgrondsoort krijgt de
-bibliotheekgrondsoort met dezelfde code of naam (hoofdletters, spaties,
-`_` en `-` maken niet uit), of de grondsoort die je in `mapping` noemt
-(naam van de modelgrondsoort → code in de bibliotheek; `None` voor geen):
-
-```python
-doorsnede.to_dstability(
-    "km0.250.stix",
-    soils="mijn_grondsoorten.stix",
-    mapping={"hollandveen": "VEEN", "jonge_zeeklei_na": "KLEI"},
-)
-doorsnede.to_xslope("km0.250.zip", soils="mijn_grondsoorten.stix", mapping={"hollandveen": "VEEN"})
-```
-
-Heb je de grondsoorten van het model in **LithoVox Soils** gekoppeld, geef dan
-het `.lvs`-bestand (LithoVox soils) mee dat het schrijft. Daarin staan de
-koppeling en de parameters samen, dus `mapping` is niet nodig (geef je die
-toch, dan vult hij de koppeling aan of vervangt hij delen ervan):
+De grondsoorten krijgen hun parameters uit het model zelf. In LithoVox koppel
+je op de pagina Grondsoorten elke grondsoortklasse van het model aan een
+grondsoort uit een voorbeeldbestand van D-Stability (`.stix`) of
+D-Settlement (`.sli`); het `.nc` bewaart dan de parameters van de
+gekoppelde grondsoorten (formaatversie 3, ondertekend met de voxels).
+`to_dstability` en `to_xslope` gebruiken de D-Stability-koppeling vanzelf:
 
 ```python
-doorsnede.to_dstability("km0.250.stix", soils="reflijn_kruin.lvs")
+doorsnede.to_dstability("km0.250.stix")   # gekoppelde grondsoorten met hun parameters
+doorsnede.to_xslope("km0.250.zip")
 ```
 
-Is het `.lvs` gemaakt voor een ander model, of een andere versie ervan (het
-bestand noemt wanneer LithoVox het model maakte en de controlesom van het
-`.nc`), dan krijg je een waarschuwing.
+Een grondsoort die niet gekoppeld is, krijgt een grondsoort met alleen zijn
+naam. Wat gekoppeld is, lees je zo:
+
+```python
+model.soil_parameter_files                  # de voorbeeldbestanden: programma, bestand, ingelezen
+model.soil_parameters()                     # {"hollandveen": {"code": "VEEN", "name": ..., "parameters": {...}}, "basalton": None, ...}
+model.soil_parameters("d_settlement")       # D-Settlement: parameters als [sleutel, waarde]-paren
+```
+
+De parameters wijzig je in het rekenprogramma; lees het voorbeeldbestand
+daarna opnieuw in LithoVox in en exporteer het model opnieuw.
 
 XSLOPE-materialen krijgen de volumegewichten en, bij Mohr-Coulomb, c en phi.
 Waterspanningen, belastingen, mesh en rekeninstellingen vul je altijd zelf in.
@@ -150,8 +145,7 @@ modellen passen in het geheugen.
 
 ```
 lithovox-exports info model.nc
-lithovox-exports doorsnede model.nc 250 km0.250.stix --grondsoorten mijn_grondsoorten.stix
-lithovox-exports doorsnede model.nc 250 km0.250.stix --grondsoorten reflijn_kruin.lvs
+lithovox-exports doorsnede model.nc 250 km0.250.stix
 lithovox-exports model model.nc model.laz --breedte 2 --hoogte 0.5
 ```
 

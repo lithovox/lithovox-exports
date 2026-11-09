@@ -1,6 +1,6 @@
 [project]
 name = "lithovox-exports"
-version = "0.2.4"
+version = "0.3.0"
 description = "Exporteer LithoVox-corridormodellen (.nc) naar D-Stability, XSLOPE, DXF, CSV, GLB, 3D Tiles en LAZ"
 readme = "README.md"
 authors = [

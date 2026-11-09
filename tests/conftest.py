@@ -13,10 +13,12 @@ SOILS = ["zand", "klei", "veen"]
 COLORS = {"zand": "#ffcc00", "klei": "#336633", "veen": "#664422"}
 
 
-def write_model(path: Path) -> Path:
+def write_model(path: Path, soil_parameters: dict | None = None) -> Path:
     """Een klein corridormodel zoals LithoVox het schrijft: 30 m rechte lijn
     van west naar oost (buitenkant links, dus binnenwaarts is naar het
-    zuiden), zand onder klei met een veenlens erin, maaiveld op 1 m."""
+    zuiden), zand onder klei met een veenlens erin, maaiveld op 1 m. Met
+    `soil_parameters` het attribuut met de gekoppelde grondsoortparameters
+    (formaatversie 3)."""
     ns, nd, nz = 30, 40, 20
     ds, dd, dz = 1.0, 0.5, 0.5
     line = [[100000.0, 400000.0], [100030.0, 400000.0]]
@@ -55,6 +57,8 @@ def write_model(path: Path) -> Path:
         dataset = f.create_dataset("soil", data=soil, chunks=(4, nd, nz), compression="gzip")
         dataset.attrs["soil_names"] = json.dumps(SOILS)
         dataset.attrs["soil_colors"] = json.dumps(COLORS)
+        if soil_parameters is not None:
+            dataset.attrs["soil_parameters"] = json.dumps(soil_parameters)
         f["ground"] = np.full((ns, nd), 1.0, dtype=np.float32)
         f["source"] = np.zeros((ns, nd), dtype=np.int32)
     return path

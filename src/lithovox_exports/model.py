@@ -3,9 +3,9 @@
 plek). Elke export is een `to_*`-methode die het geschreven pad teruggeeft."""
 
 import csv
+import hashlib
 import shutil
 import tempfile
-import warnings
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
@@ -15,60 +15,12 @@ import h5py
 import numpy as np
 
 from .convert import model_to_glb, model_to_laz, model_to_tiles
-from .dstability import read_stix_soils, write_stix
+from .dstability import write_stix
 from .dxf import write_dxf
 from .grid import ModelCrs, chainage_label, read_grid, read_metadata
-from .lvs import read_lvs, sha256
 from .profile import SMOOTHING, ProfileSlice, SoilPolygon, read_slice, section_polygons
+from .soil_parameters import dstability_library, mapping_of, read_soil_parameters
 from .xslope import write_xslope, write_xslope_zip
-
-
-def _soil_library(
-    soils: str | Path | None,
-    mapping: dict[str, str | None] | None,
-    model: "Model | None" = None,
-) -> dict | None:
-    """De grondsoorten van een D-Stability-bestand (.stix) of een
-    LithoVox-grondsoortenbestand (.lvs), met de koppeling. Bij een .lvs is
-    zijn koppeling de basis en vult `mapping` die aan of vervangt delen
-    ervan; is het voor een ander model (of een andere versie ervan) gemaakt
-    dan `model`, dan volgt een waarschuwing."""
-    if soils is None:
-        if mapping:
-            raise ValueError(
-                "Een koppeling van grondsoorten heeft het bestand met de grondsoorten nodig (soils=...)"
-            )
-        return None
-    soils = Path(soils)
-    if soils.suffix.lower() == ".lvs":
-        library = read_lvs(soils)
-        _check_lvs_model(soils, library.pop("model"), model)
-        library["mapping"].update(mapping or {})
-        return library
-    library = read_stix_soils(soils.read_bytes())
-    if mapping is not None:
-        library["mapping"] = dict(mapping)
-    return library
-
-
-def _check_lvs_model(path: Path, made_for: dict, model: "Model | None") -> None:
-    """Waarschuwt als een .lvs voor een ander model is gemaakt: eerst op
-    wanneer LithoVox het model maakte, dan op de controlesom van het bestand."""
-    if model is None or not made_for:
-        return
-    created, checksum = made_for.get("created"), made_for.get("sha256")
-    if created and model.created and created != model.created:
-        reason = f"het model van {created}, dit model is van {model.created}"
-    elif checksum and checksum != model.sha256:
-        reason = "een ander modelbestand (de controlesom verschilt)"
-    else:
-        return
-    warnings.warn(
-        f"{path.name} is gemaakt voor {made_for.get('file') or 'een ander model'} "
-        f"({reason}); de koppeling van de grondsoorten past misschien niet",
-        UserWarning,
-        stacklevel=4,
-    )
 
 
 @dataclass
@@ -82,7 +34,7 @@ class CrossSection:
     slice: ProfileSlice
     polygons: list[SoilPolygon]
     crs: ModelCrs
-    # Het model waar de doorsnede uit komt (om een .lvs mee te controleren).
+    # Het model waar de doorsnede uit komt (met de gekoppelde grondsoortparameters).
     model: "Model | None" = field(default=None, repr=False, compare=False)
 
     @property
@@ -111,45 +63,33 @@ class CrossSection:
                 f"Het model heeft geen voxels bij metrering {self.chainage:g} m"
             )
 
-    def to_dstability(
-        self,
-        path: str | Path,
-        soils: str | Path | None = None,
-        mapping: dict[str, str | None] | None = None,
-    ) -> Path:
-        """Schrijft een D-Stability-model (.stix). Met `soils` (een .stix-bestand)
-        gaan al zijn grondsoorten met hun parameters erin, en krijgt elke
-        modelgrondsoort de grondsoort die `mapping` op code noemt
-        (modelgrondsoort → code; None: geen), of anders die met dezelfde
-        code of naam. `soils` kan ook een LithoVox-grondsoortenbestand (.lvs,
-        van LithoVox Soils) zijn: dat geeft de grondsoorten en de koppeling
-        samen; `mapping` vult die dan aan of vervangt delen ervan. Een .lvs
-        voor een ander model (of een andere versie ervan) geeft een
-        waarschuwing. Water, belastingen en rekeninstellingen vul je zelf in."""
+    def _library(self) -> dict | None:
+        """De D-Stability-grondsoorten die in LithoVox aan de grondsoorten
+        van het model gekoppeld zijn (zie soil_parameters), of None."""
+        return self.model._dstability_library() if self.model is not None else None
+
+    def to_dstability(self, path: str | Path) -> Path:
+        """Schrijft een D-Stability-model (.stix). Elke grondsoort van het
+        model die in LithoVox aan een D-Stability-grondsoort gekoppeld is,
+        krijgt die grondsoort met al zijn parameters (zoals het model ze
+        bewaart, zie Model.soil_parameters); een niet gekoppelde grondsoort
+        krijgt een grondsoort met alleen zijn naam. Water, belastingen en
+        rekeninstellingen vul je zelf in."""
         self._check()
         path = Path(path)
-        write_stix(
-            self.slice, self.polygons, path, self.label, _soil_library(soils, mapping, self.model)
-        )
+        write_stix(self.slice, self.polygons, path, self.label, self._library())
         return path
 
-    def to_xslope(
-        self,
-        path: str | Path,
-        soils: str | Path | None = None,
-        mapping: dict[str, str | None] | None = None,
-    ) -> Path:
+    def to_xslope(self, path: str | Path) -> Path:
         """Schrijft een XSLOPE-invoerbestand. Een `.xlsx`-pad krijgt het
         werkboek en `<naam>_styles.json` (de kleuren, die XSLOPE Studio leest)
-        ernaast; een `.zip`-pad krijgt beide in één zip. `soils` en `mapping`
-        als bij to_dstability: de materialen krijgen dan volumegewichten en,
-        voor Mohr-Coulomb, c en phi."""
+        ernaast; een `.zip`-pad krijgt beide in één zip. De materialen van de
+        grondsoorten die in LithoVox aan een D-Stability-grondsoort gekoppeld
+        zijn, krijgen de volumegewichten en, voor Mohr-Coulomb, c en phi."""
         self._check()
         path = Path(path)
         write = write_xslope_zip if path.suffix.lower() == ".zip" else write_xslope
-        write(
-            self.slice, self.polygons, path, self.label, _soil_library(soils, mapping, self.model)
-        )
+        write(self.slice, self.polygons, path, self.label, self._library())
         return path
 
     def to_dxf(self, path: str | Path) -> Path:
@@ -233,6 +173,7 @@ class Model:
         with h5py.File(self.path, "r") as f:
             self.metadata: dict = read_metadata(f)
             self.grid = read_grid(f)
+            self._soil_parameters: dict | None = read_soil_parameters(f)
 
     def __repr__(self) -> str:
         return f"Model({self.project!r}, {self.name!r}, {self.length:.0f} m, {len(self.soils)} grondsoorten)"
@@ -244,8 +185,12 @@ class Model:
 
     @cached_property
     def sha256(self) -> str:
-        """De controlesom van het modelbestand (zoals een .lvs die noemt)."""
-        return sha256(self.path)
+        """De controlesom (SHA-256) van het modelbestand."""
+        digest = hashlib.sha256()
+        with open(self.path, "rb") as f:
+            for block in iter(lambda: f.read(1 << 20), b""):
+                digest.update(block)
+        return digest.hexdigest()
 
     @property
     def project(self) -> str:
@@ -260,6 +205,44 @@ class Model:
     def soils(self) -> list[str]:
         """De namen van de grondsoorten, in de volgorde van hun codes in het bestand."""
         return list(self.grid.soils)
+
+    @property
+    def soil_parameter_files(self) -> list[dict]:
+        """De voorbeeldbestanden waarvan het model grondsoortparameters heeft:
+        per programma `software` ("d_stability", "d_settlement"), `label`
+        ("D-Stability"), `file`, `sha256` en `loaded` (wanneer LithoVox het
+        las). Leeg als er in LithoVox geen grondsoorten gekoppeld zijn."""
+        return [
+            {key: m.get(key) for key in ("software", "label", "file", "sha256", "loaded")}
+            for m in (self._soil_parameters or {}).get("mappings") or []
+            if isinstance(m, dict)
+        ]
+
+    def soil_parameters(self, software: str = "d_stability") -> dict[str, dict | None]:
+        """Per grondsoort van het model de grondsoort van `software`
+        ("d_stability" of "d_settlement") die er in LithoVox aan gekoppeld
+        is: `code`, `name` en `parameters` (zoals in het voorbeeldbestand:
+        een D-Stability-grondsoort als dict zoals in soils.json, een
+        D-Settlement-grondsoort als lijst van [sleutel, waarde]-paren), of
+        None als er geen gekoppeld is. Leeg als het model geen koppeling voor
+        `software` heeft."""
+        mapping = mapping_of(self._soil_parameters, software)
+        if mapping is None:
+            return {}
+        out: dict[str, dict | None] = {}
+        for entry in mapping.get("soils") or []:
+            if not isinstance(entry, dict) or not isinstance(entry.get("soil"), str):
+                continue
+            out[entry["soil"]] = (
+                {key: entry.get(key) for key in ("code", "name", "parameters")}
+                if entry.get("code")
+                else None
+            )
+        return out
+
+    def _dstability_library(self) -> dict | None:
+        """De gekoppelde D-Stability-grondsoorten als bibliotheek voor de exports."""
+        return dstability_library(self._soil_parameters)
 
     @property
     def colors(self) -> dict[str, str]:

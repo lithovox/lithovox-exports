@@ -82,47 +82,52 @@ class TestCrossSection:
         }
         assert len(stix.datastructure.geometries[0].Layers) == len(section.polygons)
 
-    def test_dstability_with_soils(self, section, tmp_path):
-        library = section.to_dstability(tmp_path / "library.stix")
-        path = section.to_dstability(
-            tmp_path / "section.stix",
-            soils=library,
-            mapping={"zand": "klei", "veen": "klei"},
-        )
-        stix = DStabilityModel()
-        stix.parse(path)
-        clay = {
-            soil.Id for soil in stix.datastructure.soils.Soils if soil.Code == "klei"
-        }
-        used = {layer.SoilId for layer in stix.datastructure.soillayers[0].SoilLayers}
-        assert used <= clay
-
-    def test_mapping_needs_soils(self, section, tmp_path):
-        with pytest.raises(ValueError):
-            section.to_dstability(tmp_path / "section.stix", mapping={"zand": "klei"})
-
-    def lvs(self, section, model, tmp_path, **made_for) -> "Path":
-        """Een .lvs zoals LithoVox Soils het schrijft: zand en klei gekoppeld
-        aan de bibliotheekgrondsoort "klei", veen aan geen."""
+    def linked_model(self, section, tmp_path, **attribute) -> Model:
+        """Het testmodel met grondsoortparameters zoals LithoVox ze schrijft:
+        zand en klei gekoppeld aan de D-Stability-grondsoort "KLEI" (van een
+        .stix die de export zelf geeft), veen aan geen."""
         from lithovox_exports.dstability import read_stix_soils
+
+        from conftest import write_model
 
         library = read_stix_soils(section.to_dstability(tmp_path / "library.stix").read_bytes())
         clay = next(s for s in library["soils"] if s["Code"] == "klei")
-        clay["VolumetricWeightAbovePhreaticLevel"] = 15.5
-        path = tmp_path / "model.lvs"
-        path.write_text(json.dumps({
-            "format": "lithovox-soils",
+        clay = {**clay, "Code": "KLEI", "Name": "Klei, siltig", "VolumetricWeightAbovePhreaticLevel": 15.5}
+        data = {
+            "format": "lithovox-soil-parameters",
             "version": 1,
-            "model": {"file": "model.nc", "created": model.created, "sha256": model.sha256, **made_for},
-            "soils": [
-                {"soil": "zand", "code": "klei", "dstability": clay},
-                {"soil": "klei", "code": "klei", "dstability": clay},
-                {"soil": "veen", "code": None, "dstability": None},
+            "mappings": [
+                {
+                    "software": "d_stability",
+                    "label": "D-Stability",
+                    "file": "dijk.stix",
+                    "sha256": "ab" * 32,
+                    "loaded": "2026-11-08T12:00:00Z",
+                    "soils": [
+                        {"soil": "zand", "link": "soil", "code": "KLEI", "name": "Klei, siltig", "parameters": clay},
+                        {"soil": "klei", "link": "soil", "code": "KLEI", "name": "Klei, siltig", "parameters": clay},
+                        {"soil": "veen", "link": "none", "code": None},
+                    ],
+                },
+                {
+                    "software": "d_settlement",
+                    "label": "D-Settlement",
+                    "file": "agv.sli",
+                    "sha256": "cd" * 32,
+                    "loaded": "2026-11-08T12:00:00Z",
+                    "soils": [
+                        {"soil": "zand", "link": "undecided", "code": None},
+                        {"soil": "klei", "link": "soil", "code": "K [13,5 - 15,0]", "name": "K [13,5 - 15,0]",
+                         "parameters": [["SoilGamDry", "14.00"], ["SoilCp", "4.42E+01"]]},
+                        {"soil": "veen", "link": "suggested", "code": None},
+                    ],
+                },
             ],
-        }), encoding="utf-8")
-        return path
+            **attribute,
+        }
+        return Model(write_model(tmp_path / "linked.nc", data))
 
-    def soils_of_layers(self, path) -> dict[str, str]:
+    def soils_of_layers(self, path) -> dict:
         stix = DStabilityModel()
         stix.parse(path)
         by_id = {s.Id: s for s in stix.datastructure.soils.Soils}
@@ -130,40 +135,36 @@ class TestCrossSection:
                   for layer in stix.datastructure.geometries[0].Layers if layer.Id == sl.LayerId}
         return {layer.Label: layers[layer.Id] for layer in stix.datastructure.geometries[0].Layers}
 
-    def test_dstability_with_lvs(self, section, model, tmp_path, recwarn):
-        path = section.to_dstability(tmp_path / "section.stix", soils=self.lvs(section, model, tmp_path))
-        assert not [w for w in recwarn if "lvs" in str(w.message)]
+    def test_soil_parameters(self, section, tmp_path, model):
+        assert model.soil_parameter_files == [] and model.soil_parameters() == {}
+        linked = self.linked_model(section, tmp_path)
+        assert [f["file"] for f in linked.soil_parameter_files] == ["dijk.stix", "agv.sli"]
+        stability = linked.soil_parameters()
+        assert stability["zand"]["code"] == "KLEI"
+        assert stability["zand"]["parameters"]["VolumetricWeightAbovePhreaticLevel"] == 15.5
+        assert stability["veen"] is None
+        settlement = linked.soil_parameters("d_settlement")
+        assert settlement["klei"]["parameters"] == [["SoilGamDry", "14.00"], ["SoilCp", "4.42E+01"]]
+        assert settlement["zand"] is None and settlement["veen"] is None
+
+    def test_dstability_with_linked_parameters(self, section, tmp_path):
+        linked = self.linked_model(section, tmp_path)
+        path = linked.cross_section(15.0).to_dstability(tmp_path / "section.stix")
         soils = self.soils_of_layers(path)
-        assert soils["zand"].Code == soils["klei"].Code == "klei"
+        assert soils["zand"].Code == soils["klei"].Code == "KLEI"
         assert soils["zand"].VolumetricWeightAbovePhreaticLevel == 15.5
         assert soils["veen"].Code == "veen"  # gekoppeld aan geen: alleen de naam
 
-    def test_lvs_with_mapping(self, section, model, tmp_path):
-        lvs = self.lvs(section, model, tmp_path)
-        path = section.to_dstability(tmp_path / "section.stix", soils=lvs, mapping={"veen": "klei"})
-        assert self.soils_of_layers(path)["veen"].Code == "klei"
-
-    def test_lvs_for_another_model_warns(self, section, model, tmp_path):
-        other = self.lvs(section, model, tmp_path, created="2020-01-01T00:00:00+00:00")
-        with pytest.warns(UserWarning, match="model.lvs is gemaakt voor model.nc"):
-            section.to_dstability(tmp_path / "a.stix", soils=other)
-        changed = self.lvs(section, model, tmp_path, sha256="0" * 64)
-        with pytest.warns(UserWarning, match="controlesom"):
-            section.to_dstability(tmp_path / "b.stix", soils=changed)
-
-    def test_xslope_with_lvs(self, section, model, tmp_path):
-        path = section.to_xslope(tmp_path / "section.xlsx", soils=self.lvs(section, model, tmp_path))
+    def test_xslope_with_linked_parameters(self, section, tmp_path):
+        linked = self.linked_model(section, tmp_path)
+        path = linked.cross_section(15.0).to_xslope(tmp_path / "section.xlsx")
         assert path.exists()
 
-    def test_not_an_lvs(self, section, tmp_path):
-        bad = tmp_path / "bad.lvs"
-        bad.write_text('{"format": "iets anders"}', encoding="utf-8")
-        with pytest.raises(ValueError, match="geen LithoVox-grondsoortenbestand"):
-            section.to_dstability(tmp_path / "section.stix", soils=bad)
-        newer = tmp_path / "newer.lvs"
-        newer.write_text('{"format": "lithovox-soils", "version": 2}', encoding="utf-8")
+    def test_unreadable_soil_parameters(self, section, tmp_path):
+        with pytest.raises(ValueError, match="onbekend formaat"):
+            self.linked_model(section, tmp_path, format="iets anders")
         with pytest.raises(ValueError, match="versie 2"):
-            section.to_dstability(tmp_path / "section.stix", soils=newer)
+            self.linked_model(section, tmp_path, version=2)
 
     def test_xslope_xlsx(self, section, tmp_path):
         workbook = openpyxl.load_workbook(section.to_xslope(tmp_path / "section.xlsx"))
