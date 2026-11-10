@@ -1,0 +1,23 @@
+{
+ "what": "lithovox-exports' D-Geo Flow export of the synthetic test model, calculated by D-Geo Flow; see tests/test_dgeoflow_console.py",
+ "d_geoflow": "2026.01 (kernel 2026.1.1)",
+ "input": {
+  "boundaryconditions/boundaryconditions.json": "2d0129cee0f191c0ee623cd0f9eaf50d93008fe586021754a459cbc1154b26fa",
+  "geometries/geometry.json": "76fa627a0f47781f712317d489791ecd806c7ee77470fb13c7889a4088b99fe4",
+  "meshproperties/meshproperties.json": "183c96ca6c854f4228b5424f1788773de1faedc5fb86b2046f72153296da4faf",
+  "scenarios/scenario.json": "33df96835982cfb097b0bbb242f9f9930685e6463b81b452176fa157c5982b34",
+  "soillayers/soillayers.json": "752499e1592813dff7561a373ca021ef27fbcd0bdc0db5140eaa3b6756694ca4",
+  "soils.json": "a69c069482a015a921e528438210cbd71089369001c06119ddfcb2f7fe502929",
+  "soilvisualizations.json": "68a4651c8034654629808a954cc8b3de3f42484fa9fe3f531b083373033e4d3f"
+ },
+ "result": {
+  "elements": 56,
+  "nodes": 168,
+  "head_min_m": -1,
+  "head_max_m": 2,
+  "head_mean_m": 0.6134939285714286,
+  "discharge_max": 4.34028e-05,
+  "discharge_sum": 0.00043406641666000743,
+  "phreatic_line_segments": 12
+ }
+}

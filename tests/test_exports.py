@@ -6,11 +6,10 @@ from pathlib import Path
 import ezdxf
 import h5py
 import laspy
-import openpyxl
 import pytest
-from lithovox_stability.models.dstability import DStabilityModel
+from geolib.models.dstability import DStabilityModel
 
-from lithovox_exports import Model
+from lithovox_exports import CrossSection, Model
 from lithovox_exports.cli import main
 
 
@@ -84,16 +83,12 @@ class TestCrossSection:
         assert len(stix.datastructure.geometries[0].Layers) == len(section.polygons)
 
     def linked_model(self, section, tmp_path, **attribute) -> Model:
-        """Het testmodel met grondsoortparameters zoals LithoVox ze schrijft:
-        zand en klei gekoppeld aan de D-Stability-grondsoort "KLEI" (van een
-        .stix die de export zelf geeft), veen aan geen."""
-        from lithovox_exports.dstability import read_stix_soils
-
+        """Het testmodel met grondsoortparameters zoals LithoVox ze schrijft
+        (het attribuut van het .nc): zand en klei gekoppeld aan de
+        D-Stability-grondsoort "KLEI", veen aan geen; en D-Settlement."""
         from conftest import write_model
 
-        library = read_stix_soils(section.to_dstability(tmp_path / "library.stix").read_bytes())
-        clay = next(s for s in library["soils"] if s["Code"] == "klei")
-        clay = {**clay, "Code": "KLEI", "Name": "Klei, siltig", "VolumetricWeightAbovePhreaticLevel": 15.5}
+        clay = {"Code": "KLEI", "Name": "Klei, siltig", "VolumetricWeightAbovePhreaticLevel": 15.5}
         data = {
             "format": "lithovox-soil-parameters",
             "version": 1,
@@ -128,14 +123,6 @@ class TestCrossSection:
         }
         return Model(write_model(tmp_path / "linked.nc", data))
 
-    def soils_of_layers(self, path) -> dict:
-        stix = DStabilityModel()
-        stix.parse(path)
-        by_id = {s.Id: s for s in stix.datastructure.soils.Soils}
-        layers = {layer.Id: by_id[sl.SoilId] for sl in stix.datastructure.soillayers[0].SoilLayers
-                  for layer in stix.datastructure.geometries[0].Layers if layer.Id == sl.LayerId}
-        return {layer.Label: layers[layer.Id] for layer in stix.datastructure.geometries[0].Layers}
-
     def test_soil_parameters(self, section, tmp_path, model):
         assert model.soil_parameter_files == [] and model.soil_parameters() == {}
         linked = self.linked_model(section, tmp_path)
@@ -148,92 +135,162 @@ class TestCrossSection:
         assert settlement["klei"]["parameters"] == [["SoilGamDry", "14.00"], ["SoilCp", "4.42E+01"]]
         assert settlement["zand"] is None and settlement["veen"] is None
 
-    def soil_links(self, linked: Model, tmp_path, **changes) -> "Path":
-        """Een koppelbestand zoals LithoVox Stability het schrijft: de
-        D-Stability-koppeling van het testmodel, bij dat model."""
-        data = {
-            "format": "lithovox-soil-parameters",
-            "version": 1,
-            "model": {"file": linked.path.name, "sha256": linked.sha256},
-            "mappings": [
-                {"software": "d_stability", "label": "D-Stability", "file": "dijk.stix",
-                 "sha256": "ab" * 32, "loaded": "2026-11-09T12:00:00Z",
-                 "soils": list(linked._soil_parameters["mappings"][0]["soils"])},
-            ],
-            **changes,
-        }
-        path = tmp_path / "dijk.soil-links.json"
-        path.write_text(json.dumps(data), encoding="utf-8")
-        return path
-
-    def test_dstability_with_soil_links(self, section, tmp_path):
-        linked = self.linked_model(section, tmp_path)
-        links = self.soil_links(linked, tmp_path)
-        path = linked.cross_section(15.0).to_dstability(tmp_path / "section.stix", soil_links=links)
-        soils = self.soils_of_layers(path)
-        assert soils["zand"].Code == soils["klei"].Code == "KLEI"
-        assert soils["zand"].VolumetricWeightAbovePhreaticLevel == 15.5
-        assert soils["veen"].Code == "veen"  # gekoppeld aan geen: alleen de naam
-        # De inhoud als dict werkt ook.
-        data = json.loads(links.read_text(encoding="utf-8"))
-        again = linked.cross_section(15.0).to_dstability(tmp_path / "again.stix", soil_links=data)
-        assert self.soils_of_layers(again)["zand"].Code == "KLEI"
-
-    def test_without_soil_links_only_names(self, section, tmp_path):
-        # Een D-Stability-koppeling in het .nc telt niet meer: die is van LithoVox Stability.
-        linked = self.linked_model(section, tmp_path)
-        soils = self.soils_of_layers(linked.cross_section(15.0).to_dstability(tmp_path / "section.stix"))
-        assert soils["zand"].Code == "zand" and soils["klei"].Code == "klei"
-
-    def test_soil_links_of_another_model_or_unreadable(self, section, tmp_path):
-        linked = self.linked_model(section, tmp_path)
-        cut = linked.cross_section(15.0)
-        other = self.soil_links(linked, tmp_path, model={"file": "ander.nc", "sha256": "00" * 32})
-        with pytest.raises(ValueError, match="ander model"):
-            cut.to_dstability(tmp_path / "s.stix", soil_links=other)
-        with pytest.raises(ValueError, match="niet bij welk model"):
-            cut.to_dstability(tmp_path / "s.stix", soil_links=self.soil_links(linked, tmp_path, model=None))
-        with pytest.raises(ValueError, match="versie 2"):
-            cut.to_xslope(tmp_path / "s.xlsx", soil_links=self.soil_links(linked, tmp_path, version=2))
-        broken = tmp_path / "kapot.soil-links.json"
-        broken.write_text("{", encoding="utf-8")
-        with pytest.raises(ValueError, match="niet te lezen"):
-            cut.to_dstability(tmp_path / "s.stix", soil_links=broken)
-
-    def test_xslope_with_soil_links(self, section, tmp_path):
-        linked = self.linked_model(section, tmp_path)
-        links = self.soil_links(linked, tmp_path)
-        path = linked.cross_section(15.0).to_xslope(tmp_path / "section.xlsx", soil_links=links)
-        assert path.exists()
-
-    def test_cli_takes_soil_links(self, section, tmp_path):
-        linked = self.linked_model(section, tmp_path)
-        links = self.soil_links(linked, tmp_path)
-        out = tmp_path / "cli.stix"
-        assert main(["doorsnede", str(linked.path), "15", str(out), "--koppelingen", str(links)]) == 0
-        assert self.soils_of_layers(out)["zand"].Code == "KLEI"
-
     def test_unreadable_soil_parameters(self, section, tmp_path):
         with pytest.raises(ValueError, match="onbekend formaat"):
             self.linked_model(section, tmp_path, format="iets anders")
         with pytest.raises(ValueError, match="versie 2"):
             self.linked_model(section, tmp_path, version=2)
 
-    def test_xslope_xlsx(self, section, tmp_path):
-        workbook = openpyxl.load_workbook(section.to_xslope(tmp_path / "section.xlsx"))
-        assert "polygon" in workbook.sheetnames
-        styles = json.loads(
-            (tmp_path / "section_styles.json").read_text(encoding="utf-8")
-        )
-        assert styles["materials"]
+    def test_the_nc_soil_parameters_do_not_go_into_an_export(self, section, tmp_path):
+        # De D-Stability-koppeling in het .nc telt niet voor de export: alleen een eigen bestand.
+        linked = self.linked_model(section, tmp_path)
+        soils = soils_of_layers(linked.cross_section(15.0).to_dstability(tmp_path / "section.stix"))
+        assert soils["zand"].Code == "zand" and soils["klei"].Code == "klei"
 
-    def test_xslope_zip(self, section, tmp_path):
-        path = section.to_xslope(tmp_path / "section.zip")
-        assert sorted(zipfile.ZipFile(path).namelist()) == [
-            "section.xlsx",
-            "section_styles.json",
-        ]
 
+def soils_of_layers(path, program=None) -> dict:
+    """Per laag (zijn label: de modelgrondsoort) de grondsoort die hij heeft."""
+    model = (program or DStabilityModel)()
+    model.parse(path)
+    ds = model.datastructure
+    by_id = {s.Id: s for s in ds.soils.Soils}
+    soil_of = {sl.LayerId: by_id[sl.SoilId] for sl in ds.soillayers[0].SoilLayers}
+    return {layer.Label: soil_of[layer.Id] for layer in ds.geometries[0].Layers}
+
+
+@pytest.fixture
+def stix_library(tmp_path) -> Path:
+    """Een eigen D-Stability-bestand met drie grondsoorten: KLEI (eigen
+    volumegewicht), veen (de code van een modelgrondsoort) en EXTRA."""
+    from geolib.soils.soil import Soil
+
+    stix = DStabilityModel()
+    stix.datastructure.soils.Soils = []
+    for code, name in (("KLEI", "Klei, siltig"), ("veen", "Veen, bibliotheek"), ("EXTRA", "Niet gebruikt")):
+        stix.add_soil(Soil(name=name, code=code))
+    for soil in stix.datastructure.soils.Soils:
+        soil.VolumetricWeightAbovePhreaticLevel = {"KLEI": 15.5, "veen": 10.5, "EXTRA": 20.0}[soil.Code]
+    path = tmp_path / "bibliotheek.stix"
+    stix.serialize(path)
+    return path
+
+
+@pytest.fixture
+def flox_library(tmp_path) -> Path:
+    """Een eigen D-Geo Flow-bestand: ZAND (doorlatend) en KLEI (slecht doorlatend)."""
+    from geolib.models.dgeoflow import DGeoFlowModel
+    from geolib.soils.soil import Soil
+
+    flox = DGeoFlowModel()
+    flox.datastructure.soils.Soils = []
+    for code in ("ZAND", "KLEI"):
+        flox.add_soil(Soil(name=code.title(), code=code))
+    for soil in flox.datastructure.soils.Soils:
+        soil.HorizontalPermeability, soil.VerticalPermeability = {"ZAND": (5.0, 2.5), "KLEI": (1e-4, 5e-5)}[soil.Code]
+    path = tmp_path / "bibliotheek.flox"
+    flox.serialize(path)
+    return path
+
+
+class TestSoilLibrary:
+    def test_dstability_with_own_soils(self, section, tmp_path, stix_library):
+        mapping = {"zand": "KLEI", "klei": "KLEI", "veen": None}
+        path = section.to_dstability(tmp_path / "s.stix", soils=stix_library, mapping=mapping)
+        soils = soils_of_layers(path)
+        assert soils["zand"].Code == soils["klei"].Code == "KLEI"
+        assert soils["zand"].VolumetricWeightAbovePhreaticLevel == 15.5
+        assert soils["veen"].Code == "veen"  # gekoppeld aan geen: alleen de naam
+        # Alleen de gebruikte grondsoorten, niet de hele bibliotheek.
+        stix = DStabilityModel()
+        stix.parse(path)
+        assert sorted(s.Code for s in stix.datastructure.soils.Soils) == ["KLEI", "veen"]
+
+    def test_soils_not_named_get_their_name(self, section, tmp_path, stix_library):
+        soils = soils_of_layers(section.to_dstability(tmp_path / "s.stix", soils=stix_library, mapping={"klei": "KLEI"}))
+        assert soils["klei"].Code == "KLEI" and soils["zand"].Code == "zand" and soils["veen"].Code == "veen"
+
+    def test_a_code_taken_by_a_linked_soil(self, section, tmp_path, stix_library):
+        # klei krijgt de bibliotheekgrondsoort "veen"; de modelgrondsoort veen (niet gekoppeld) wijkt uit.
+        soils = soils_of_layers(section.to_dstability(tmp_path / "s.stix", soils=stix_library, mapping={"klei": "veen"}))
+        assert soils["klei"].Code == "veen" and soils["klei"].VolumetricWeightAbovePhreaticLevel == 10.5
+        assert soils["veen"].Code == "veen (2)"
+
+    def test_mapping_from_a_json_file(self, section, tmp_path, stix_library):
+        mapping = tmp_path / "koppeling.json"
+        mapping.write_text(json.dumps({"zand": "KLEI", "veen": None}), encoding="utf-8")
+        soils = soils_of_layers(section.to_dstability(tmp_path / "s.stix", soils=stix_library, mapping=mapping))
+        assert soils["zand"].Code == "KLEI"
+
+    def test_dgeoflow(self, section, tmp_path):
+        from geolib.models.dgeoflow import DGeoFlowModel
+
+        path = section.to_dgeoflow(tmp_path / "section.flox")
+        flox = DGeoFlowModel()
+        flox.parse(path)
+        assert {s.Code for s in flox.datastructure.soils.Soils} == {"zand", "klei", "veen"}
+        assert len(flox.datastructure.geometries[0].Layers) == len(section.polygons)
+        assert flox.datastructure.scenarios[0].Label == "km0.015"
+        assert len(flox.datastructure.soilvisualizations.SoilVisualizations) == 3
+
+    def test_dgeoflow_with_own_soils(self, section, tmp_path, flox_library):
+        from geolib.models.dgeoflow import DGeoFlowModel
+
+        path = section.to_dgeoflow(tmp_path / "s.flox", soils=flox_library, mapping={"zand": "ZAND", "klei": "KLEI"})
+        soils = soils_of_layers(path, DGeoFlowModel)
+        assert soils["zand"].HorizontalPermeability == 5.0 and soils["zand"].VerticalPermeability == 2.5
+        assert soils["klei"].HorizontalPermeability == 1e-4
+        assert soils["veen"].Code == "veen"
+
+    def test_only_the_same_program(self, section, tmp_path, stix_library, flox_library):
+        with pytest.raises(ValueError, match="uit een .stix-bestand"):
+            section.to_dstability(tmp_path / "s.stix", soils=flox_library, mapping={"zand": "ZAND"})
+        with pytest.raises(ValueError, match="uit een .flox-bestand"):
+            section.to_dgeoflow(tmp_path / "s.flox", soils=stix_library, mapping={"zand": "KLEI"})
+
+    def test_mistakes_are_errors(self, section, tmp_path, stix_library):
+        cut = lambda **kw: section.to_dstability(tmp_path / "s.stix", **kw)  # noqa: E731
+        with pytest.raises(ValueError, match="allebei"):
+            cut(soils=stix_library)
+        with pytest.raises(ValueError, match="allebei"):
+            cut(mapping={"zand": "KLEI"})
+        with pytest.raises(ValueError, match="geen grondsoort van het model"):
+            cut(soils=stix_library, mapping={"leem": "KLEI"})
+        with pytest.raises(ValueError, match="geen grondsoort met de code ONBEKEND"):
+            cut(soils=stix_library, mapping={"zand": "ONBEKEND"})
+        with pytest.raises(ValueError, match="verwacht de code"):
+            cut(soils=stix_library, mapping={"zand": 5})
+        array = tmp_path / "lijst.json"
+        array.write_text("[1]", encoding="utf-8")
+        with pytest.raises(ValueError, match="geen object"):
+            cut(soils=stix_library, mapping=array)
+        broken = tmp_path / "kapot.json"
+        broken.write_text("{", encoding="utf-8")
+        with pytest.raises(ValueError, match="niet te lezen"):
+            cut(soils=stix_library, mapping=broken)
+        garbage = tmp_path / "kapot.stix"
+        garbage.write_bytes(b"geen zip")
+        with pytest.raises(ValueError, match="geen D-Stability-bestand"):
+            cut(soils=garbage, mapping={"zand": "KLEI"})
+        with pytest.raises(ValueError, match="niet te lezen"):
+            cut(soils=tmp_path / "bestaat-niet.stix", mapping={"zand": "KLEI"})
+
+    def test_cli_takes_soils_and_mapping(self, model_path, tmp_path, stix_library, flox_library):
+        mapping = tmp_path / "koppeling.json"
+        mapping.write_text(json.dumps({"zand": "KLEI"}), encoding="utf-8")
+        out = tmp_path / "cli.stix"
+        assert main(["doorsnede", str(model_path), "15", str(out), "--grondsoorten", str(stix_library),
+                     "--koppeling", str(mapping)]) == 0
+        assert soils_of_layers(out)["zand"].Code == "KLEI"
+        mapping.write_text(json.dumps({"zand": "ZAND"}), encoding="utf-8")
+        assert main(["doorsnede", str(model_path), "15", str(tmp_path / "cli.flox"), "--grondsoorten",
+                     str(flox_library), "--koppeling", str(mapping)]) == 0
+        # Een verkeerd bestand is een foutmelding (1), geen crash.
+        assert main(["doorsnede", str(model_path), "15", str(out), "--grondsoorten", str(flox_library),
+                     "--koppeling", str(mapping)]) == 1
+        assert main(["doorsnede", str(model_path), "15", str(tmp_path / "s.dxf"), "--koppeling", str(mapping)]) == 1
+
+
+class TestExports:
     def test_dxf(self, section, tmp_path):
         doc = ezdxf.readfile(section.to_dxf(tmp_path / "section.dxf"))
         layers = {layer.dxf.name for layer in doc.layers}
@@ -313,3 +370,10 @@ class TestCli:
     def test_unknown_format(self, model_path, tmp_path):
         with pytest.raises(SystemExit):
             main(["doorsnede", str(model_path), "15", str(tmp_path / "s.txt")])
+
+    @pytest.mark.parametrize("suffix", [".xlsx", ".zip"])
+    def test_no_xslope_any_more(self, model_path, tmp_path, suffix):
+        # XSLOPE is vervallen in 0.5.0; .zip blijft alleen voor 3D Tiles van het hele model.
+        with pytest.raises(SystemExit):
+            main(["doorsnede", str(model_path), "15", str(tmp_path / f"s{suffix}")])
+        assert not hasattr(CrossSection, "to_xslope")

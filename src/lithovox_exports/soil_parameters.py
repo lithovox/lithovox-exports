@@ -26,18 +26,9 @@ voorbeeldbestand: een D-Stability-grondsoort als zijn JSON-object, een
 D-Settlement-grondsoort als lijst van [sleutel, waarde]-paren (waarden als
 tekst). Het bedrijf ondertekent ze samen met de voxels.
 
-Sinds november 2026 koppel je de D-Stability-grondsoorten in LithoVox
-Stability, niet meer in LithoVox: het `.nc` heeft dan alleen nog
-D-Settlement. LithoVox Stability bewaart de koppelingen als een open
-**koppelbestand** (`*.soil-links.json`): dezelfde JSON met één koppeling
-("d_stability") en het model waar ze bij horen:
-
-    {"format": "lithovox-soil-parameters", "version": 1,
-     "model": {"file": "dijk.nc", "sha256": "…"},
-     "mappings": [{"software": "d_stability", …, "soils": [...]}]}
-
-`to_dstability` en `to_xslope` nemen het als `soil_links`
-(read_soil_links leest en controleert het)."""
+Sinds november 2026 koppel je de D-Stability-grondsoorten niet meer in
+LithoVox: het `.nc` heeft dan alleen nog D-Settlement. Voor de exports geef
+je een eigen `.stix` of `.flox` met een koppeling (zie soil_library.py)."""
 
 import json
 from pathlib import Path
@@ -77,28 +68,6 @@ def _check(data, what: str) -> dict:
     return data
 
 
-def read_soil_links(source: "str | Path | dict") -> dict:
-    """Een koppelbestand van LithoVox Stability (`*.soil-links.json`, een pad)
-    of de inhoud ervan (een dict), gelezen en gecontroleerd: formaat, versie,
-    een D-Stability-koppeling en het model waar het bij hoort. ValueError
-    als het niet te lezen is."""
-    if isinstance(source, dict):
-        data = source
-    else:
-        path = Path(source)
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
-            raise ValueError(f"Het koppelbestand {path.name} is niet te lezen: {e}") from e
-    _check(data, "De koppelingen")
-    if mapping_of(data, "d_stability") is None:
-        raise ValueError("Het koppelbestand heeft geen D-Stability-koppeling")
-    model = data.get("model")
-    if not isinstance(model, dict) or not isinstance(model.get("sha256"), str):
-        raise ValueError("Het koppelbestand zegt niet bij welk model het hoort")
-    return data
-
-
 def mapping_of(data: dict | None, software: str) -> dict | None:
     """De koppeling van één programma ("d_stability" of "d_settlement") uit
     `data` (zoals read_soil_parameters het geeft), of None."""
@@ -106,27 +75,3 @@ def mapping_of(data: dict | None, software: str) -> dict | None:
         if isinstance(mapping, dict) and mapping.get("software") == software:
             return mapping
     return None
-
-
-def dstability_library(data: dict | None) -> dict | None:
-    """De D-Stability-grondsoorten van het model als bibliotheek voor de
-    exports: `soils` (elke gekoppelde grondsoort één keer, zoals in
-    soils.json van een .stix) en `mapping` (modelgrondsoort → code, None voor
-    geen). None als het model geen D-Stability-koppeling heeft."""
-    mapping = mapping_of(data, "d_stability")
-    if mapping is None:
-        return None
-    soils: dict[str, dict] = {}
-    links: dict[str, str | None] = {}
-    for entry in mapping.get("soils") or []:
-        if not isinstance(entry, dict) or not isinstance(entry.get("soil"), str):
-            continue
-        code = entry.get("code") or None
-        parameters = entry.get("parameters")
-        if code and not isinstance(parameters, dict):
-            code = None
-        links[entry["soil"]] = code
-        # Meerdere modelgrondsoorten kunnen dezelfde grondsoort hebben: die komt er één keer in.
-        if code and code not in soils:
-            soils[code] = parameters
-    return {"soils": list(soils.values()), "mapping": links}

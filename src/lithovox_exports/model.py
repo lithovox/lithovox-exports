@@ -15,12 +15,13 @@ import h5py
 import numpy as np
 
 from .convert import model_to_glb, model_to_laz, model_to_tiles
+from .dgeoflow import write_flox
 from .dstability import write_stix
 from .dxf import write_dxf
 from .grid import ModelCrs, chainage_label, read_grid, read_metadata
 from .profile import SMOOTHING, ProfileSlice, SoilPolygon, read_slice, section_polygons
-from .soil_parameters import dstability_library, mapping_of, read_soil_links, read_soil_parameters
-from .xslope import write_xslope, write_xslope_zip
+from .soil_library import linked_soils
+from .soil_parameters import mapping_of, read_soil_parameters
 
 
 @dataclass
@@ -63,42 +64,42 @@ class CrossSection:
                 f"Het model heeft geen voxels bij metrering {self.chainage:g} m"
             )
 
-    def _library(self, soil_links: "str | Path | dict | None") -> dict | None:
-        """De D-Stability-grondsoorten uit een koppelbestand van LithoVox
-        Stability (zie soil_parameters.read_soil_links), of None zonder.
-        ValueError als het bij een ander model hoort."""
-        if soil_links is None:
-            return None
-        data = read_soil_links(soil_links)
-        if self.model is not None and data["model"]["sha256"] != self.model.sha256:
-            raise ValueError(
-                f"Het koppelbestand hoort bij een ander model ({data['model'].get('file', '?')}), "
-                f"niet bij {self.model.path.name}: maak het opnieuw in LithoVox Stability"
-            )
-        return dstability_library(data)
-
-    def to_dstability(self, path: str | Path, soil_links: "str | Path | dict | None" = None) -> Path:
-        """Schrijft een D-Stability-model (.stix). Met `soil_links` (het
-        koppelbestand van LithoVox Stability, of de inhoud ervan) krijgt elke
-        gekoppelde grondsoort de D-Stability-grondsoort met al zijn
-        parameters; een niet gekoppelde grondsoort (of alles, zonder
-        `soil_links`) krijgt een grondsoort met alleen zijn naam. Water,
-        belastingen en rekeninstellingen vul je zelf in."""
+    def to_dstability(
+        self,
+        path: str | Path,
+        soils: str | Path | None = None,
+        mapping: "dict[str, str | None] | str | Path | None" = None,
+    ) -> Path:
+        """Schrijft een D-Stability-model (.stix). Met `soils` (een eigen
+        `.stix`) en `mapping` ({grondsoort van het model: code van de
+        grondsoort in `soils`}, of een JSON-bestand daarmee) krijgt elke
+        gekoppelde grondsoort de grondsoort uit `soils` met al zijn
+        parameters; een niet gekoppelde (niet genoemd of None) krijgt alleen
+        zijn naam. Alleen de gebruikte grondsoorten gaan erin. Water,
+        belastingen en rekeninstellingen vul je zelf in. ValueError bij een
+        verkeerd bestand, een onbekende grondsoort of code (zie
+        soil_library.py)."""
         self._check()
         path = Path(path)
-        write_stix(self.slice, self.polygons, path, self.label, self._library(soil_links))
+        linked = linked_soils(self.slice.soils, soils, mapping, ".stix")
+        write_stix(self.slice, self.polygons, path, self.label, linked)
         return path
 
-    def to_xslope(self, path: str | Path, soil_links: "str | Path | dict | None" = None) -> Path:
-        """Schrijft een XSLOPE-invoerbestand. Een `.xlsx`-pad krijgt het
-        werkboek en `<naam>_styles.json` (de kleuren, die XSLOPE Studio leest)
-        ernaast; een `.zip`-pad krijgt beide in één zip. Met `soil_links`
-        (zie to_dstability) krijgen de materialen van de gekoppelde
-        grondsoorten de volumegewichten en, voor Mohr-Coulomb, c en phi."""
+    def to_dgeoflow(
+        self,
+        path: str | Path,
+        soils: str | Path | None = None,
+        mapping: "dict[str, str | None] | str | Path | None" = None,
+    ) -> Path:
+        """Schrijft een D-Geo Flow-model (.flox): de lagen en grondsoorten.
+        Met `soils` (een eigen `.flox`) en `mapping` (zie to_dstability)
+        krijgen de gekoppelde grondsoorten hun doorlatendheden uit `soils`;
+        de andere alleen hun naam. Randvoorwaarden, mesh en
+        rekeninstellingen vul je zelf in."""
         self._check()
         path = Path(path)
-        write = write_xslope_zip if path.suffix.lower() == ".zip" else write_xslope
-        write(self.slice, self.polygons, path, self.label, self._library(soil_links))
+        linked = linked_soils(self.slice.soils, soils, mapping, ".flox")
+        write_flox(self.slice, self.polygons, path, self.label, linked)
         return path
 
     def to_dxf(self, path: str | Path) -> Path:

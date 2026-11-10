@@ -1,13 +1,13 @@
 [project]
 name = "lithovox-exports"
-version = "0.4.0"
-description = "Exporteer LithoVox-corridormodellen (.nc) naar D-Stability, XSLOPE, DXF, CSV, GLB, 3D Tiles en LAZ"
+version = "0.5.0"
+description = "Exporteer LithoVox-corridormodellen (.nc) naar D-Stability, D-Geo Flow, DXF, CSV, GLB, 3D Tiles en LAZ"
 readme = "README.md"
 authors = [
     { name = "Rob van Putten", email = "breinbaas@pm.me" }
 ]
 requires-python = ">=3.12"
-keywords = ["geotechniek", "voxelmodel", "d-stability", "xslope", "dxf", "ondergrond"]
+keywords = ["geotechniek", "voxelmodel", "d-stability", "d-geo flow", "dxf", "ondergrond"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
@@ -15,22 +15,16 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "lithovox-stability>=0.1.0",
+    "d-geolib>=2.9.1,<3",
     "ezdxf>=1.4",
     "h5py>=3.16.0",
     "laspy[lazrs]>=2.7.0",
     "matplotlib>=3.10",
     "numpy>=2.3",
-    "openpyxl>=3.1",
     "pyproj>=3.7",
     "scipy>=1.16",
     "shapely>=2.1",
 ]
-
-[tool.uv.sources]
-# lithovox-stability is nog een lokaal pakket; het staat op het punt naar PyPI te gaan.
-# Zodra dat gebeurd is, kan deze regel weg.
-lithovox-stability = { path = "../lithovox-stability", editable = true }
 
 [project.urls]
 Homepage = "https://www.lithovox.com"

@@ -1,10 +1,13 @@
 # lithovox-exports
 
 Zet de voxelmodellen die LithoVox levert (corridormodellen, `.nc`) om naar
-invoer voor je eigen software: D-Stability, XSLOPE, DXF en CSV per
+invoer voor je eigen software: D-Stability, D-Geo Flow, DXF en CSV per
 dwarsdoorsnede, en GLB, 3D Tiles en LAZ voor het hele model. Daarnaast
 maakt het pakket figuren (kaart, doorsnede, grondkolom) en geeft het de
 grondopbouw op elk punt als een virtuele boring.
+
+De D-Stability- en D-Geo Flow-bestanden worden geschreven met
+[GEOLib](https://github.com/Deltares/GEOLib) van Deltares (`d-geolib`, MIT).
 
 Uitgebreide, uitgelegde voorbeelden staan in het notebook
 [`notebooks/voorbeelden.ipynb`](notebooks/voorbeelden.ipynb).
@@ -61,8 +64,7 @@ doorsnede = model.cross_section(250)                # gladgemaakte grenzen
 trap = model.cross_section(250, smoothing=0)        # de trap van de voxels
 
 doorsnede.to_dstability("km0.250.stix")   # D-Stability
-doorsnede.to_xslope("km0.250.zip")        # XSLOPE: .xlsx + kleuren, gezipt
-doorsnede.to_xslope("km0.250.xlsx")       # of de .xlsx met *_styles.json ernaast
+doorsnede.to_dgeoflow("km0.250.flox")     # D-Geo Flow
 doorsnede.to_dxf("km0.250.dxf")           # DXF (GEO5, CAD)
 doorsnede.to_csv("km0.250.csv")           # hoekpunten van de polygonen
 doorsnede.plot()                          # figuur (matplotlib)
@@ -75,25 +77,29 @@ for doorsnede in model.cross_sections(every=50):
     doorsnede.to_dstability(f"{doorsnede.label}.stix")   # km0.000.stix, km0.050.stix, ...
 ```
 
-### Grondsoorten met parameters (D-Stability, XSLOPE)
+### Grondsoorten met parameters (D-Stability, D-Geo Flow)
 
-De D-Stability-grondsoorten koppel je in **LithoVox Stability**: elke
-grondsoort van het model aan een grondsoort uit een D-Stability-bestand
-(`.stix`), of aan geen. LithoVox Stability bewaart de koppelingen als een open
-**koppelbestand** (`*.soil-links.json`): de koppelingen, de parameters van de
-gekoppelde grondsoorten zoals in de `.stix`, en het model waar ze bij horen
-(zijn SHA-256). `to_dstability` en `to_xslope` nemen het als `soil_links`:
+Zonder meer krijgt elke grondsoort alleen zijn naam (en kleur), met de
+standaardparameters van het programma. Je eigen parameters komen uit een eigen
+bestand van hetzelfde programma (een `.stix` voor D-Stability, een `.flox` voor
+D-Geo Flow) met een koppeling: per grondsoort van het model de code van zijn
+grondsoort in dat bestand.
 
 ```python
-doorsnede.to_dstability("km0.250.stix", soil_links="dijk.soil-links.json")
-doorsnede.to_xslope("km0.250.zip", soil_links="dijk.soil-links.json")
+koppeling = {"klei": "K_Ozw", "zand": "Z_Pleist", "veen": None}
+doorsnede.to_dstability("km0.250.stix", soils="grondsoorten.stix", mapping=koppeling)
+doorsnede.to_dgeoflow("km0.250.flox", soils="grondsoorten.flox", mapping={"zand": "Zand"})
 ```
 
-Op de opdrachtregel: `lithovox-exports doorsnede dijk.nc 250 km0.250.stix
---koppelingen dijk.soil-links.json`. Een koppelbestand van een ander model wordt
-geweigerd. Zonder koppelbestand, en voor een grondsoort die aan geen gekoppeld
-is, krijgt een grondsoort alleen zijn naam. LithoVox levert geen koppelingen
-mee: ze zijn van de gebruiker.
+Een gekoppelde grondsoort komt met al zijn parameters in de export (bij D-Geo
+Flow de doorlatendheden); een grondsoort die de koppeling niet noemt, of aan
+`None` koppelt, krijgt alleen zijn naam. Alleen de grondsoorten die de
+doorsnede gebruikt gaan erin. De koppeling mag ook een JSON-bestand met
+hetzelfde object zijn. Een bestand van het andere programma, een naam die geen
+grondsoort van het model is of een code die het bestand niet heeft, geeft een
+foutmelding. Op de opdrachtregel: `lithovox-exports doorsnede dijk.nc 250
+km0.250.stix --grondsoorten grondsoorten.stix --koppeling koppeling.json`.
+LithoVox levert geen koppelingen mee: ze zijn van de gebruiker.
 
 Het model zelf kan parameters van D-Settlement-grondsoorten hebben (in LithoVox
 gekoppeld, formaatversie 3, ondertekend met de voxels):
@@ -103,7 +109,6 @@ model.soil_parameter_files                  # de voorbeeldbestanden: programma, 
 model.soil_parameters("d_settlement")       # {"klei": {"code": ..., "parameters": [[sleutel, waarde], ...]}, ...}
 ```
 
-XSLOPE-materialen krijgen de volumegewichten en, bij Mohr-Coulomb, c en phi.
 Waterspanningen, belastingen, mesh en rekeninstellingen vul je altijd zelf in.
 
 ## Grondopbouw op een punt
@@ -151,9 +156,22 @@ lithovox-exports doorsnede model.nc 250 km0.250.stix
 lithovox-exports model model.nc model.laz --breedte 2 --hoogte 0.5
 ```
 
-Het formaat volgt uit de extensie: `.stix`, `.xlsx`, `.zip` (XSLOPE),
-`.dxf`, `.csv` of `.png` voor een doorsnede; `.glb`, `.laz` of `.zip`
-(3D Tiles) voor het hele model.
+Het formaat volgt uit de extensie: `.stix`, `.flox`, `.dxf`, `.csv` of `.png`
+voor een doorsnede; `.glb`, `.laz` of `.zip` (3D Tiles) voor het hele model.
+
+## Wijzigingen
+
+- **0.5.0**:
+  - D-Geo Flow (`to_dgeoflow`, `.flox`) is terug.
+  - De grondsoortparameters komen uit een eigen `.stix` of `.flox` met een
+    koppeling (`soils`, `mapping`; `--grondsoorten`, `--koppeling`), in plaats
+    van uit het koppelbestand van LithoVox Stability (`soil_links`,
+    `--koppelingen` zijn vervallen). Alleen de gebruikte grondsoorten gaan in
+    de export, niet de hele bibliotheek.
+  - De XSLOPE-export (`to_xslope`, `.xlsx`/`.zip` op de opdrachtregel) is
+    vervallen.
+  - D-Stability-bestanden worden geschreven met GEOLib (`d-geolib`) in plaats
+    van lithovox-stability; zonder koppeling zijn ze inhoudelijk gelijk.
 
 ## Meer
 

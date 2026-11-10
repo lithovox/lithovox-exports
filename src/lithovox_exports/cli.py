@@ -8,7 +8,7 @@ from pathlib import Path
 from .model import Model
 from .profile import SMOOTHING
 
-SECTION_FORMATS = [".stix", ".xlsx", ".zip", ".dxf", ".csv", ".png"]
+SECTION_FORMATS = [".stix", ".flox", ".dxf", ".csv", ".png"]
 MODEL_FORMATS = [".glb", ".laz", ".zip"]
 
 
@@ -43,9 +43,11 @@ def _section(model: Model, args: argparse.Namespace) -> Path:
     section = model.cross_section(args.metrering, args.smoothing)
     path, suffix = args.uitvoer, args.uitvoer.suffix.lower()
     if suffix == ".stix":
-        return section.to_dstability(path, args.koppelingen)
-    if suffix in (".xlsx", ".zip"):
-        return section.to_xslope(path, args.koppelingen)
+        return section.to_dstability(path, args.grondsoorten, args.koppeling)
+    if suffix == ".flox":
+        return section.to_dgeoflow(path, args.grondsoorten, args.koppeling)
+    if args.grondsoorten or args.koppeling:
+        raise ValueError("--grondsoorten en --koppeling gelden alleen voor .stix en .flox")
     if suffix == ".dxf":
         return section.to_dxf(path)
     if suffix == ".csv":
@@ -87,10 +89,16 @@ def main(argv: list[str] | None = None) -> int:
         help=f"in voxels (standaard {SMOOTHING})",
     )
     section.add_argument(
-        "--koppelingen",
+        "--grondsoorten",
         type=Path,
-        help="het koppelbestand van LithoVox Stability (*.soil-links.json): "
-        "de D-Stability-grondsoorten met hun parameters (.stix, .xlsx, .zip)",
+        help="een eigen .stix (voor .stix) of .flox (voor .flox) met de grondsoorten "
+        "en hun parameters; samen met --koppeling",
+    )
+    section.add_argument(
+        "--koppeling",
+        type=Path,
+        help='JSON {"grondsoort in het model": "code in --grondsoorten", ...}; '
+        "null of niet genoemd: alleen de naam",
     )
 
     whole = commands.add_parser(
