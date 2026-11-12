@@ -55,7 +55,7 @@ model.plot_map(chainages=[250, 500])   # kaart met de plekken van doorsneden
 
 Een dwarsdoorsnede ligt haaks op de referentielijn, bij de modelkolom die
 het dichtst bij de gevraagde metrering ligt. De grenzen tussen
-grondsoorten worden uit de voxels opgespoord en gladgemaakt tot polygonen
+grondsoorten worden uit de voxels opgebouwd en omgezet tot polygonen
 die hun punten precies met hun buren delen en geen gaten hebben (zoals
 D-Stability vereist).
 
@@ -79,7 +79,7 @@ for doorsnede in model.cross_sections(every=50):
 
 ### Grondsoorten met parameters (D-Stability, D-Geo Flow)
 
-Zonder meer krijgt elke grondsoort alleen zijn naam (en kleur), met de
+Een grondsoort krijgt standaard alleen zijn naam (en kleur), met de
 standaardparameters van het programma. Je eigen parameters komen uit een eigen
 bestand van hetzelfde programma (een `.stix` voor D-Stability, een `.flox` voor
 D-Geo Flow) met een koppeling: per grondsoort van het model de code van zijn
@@ -101,22 +101,12 @@ foutmelding. Op de opdrachtregel: `lithovox-exports doorsnede dijk.nc 250
 km0.250.stix --grondsoorten grondsoorten.stix --koppeling koppeling.json`.
 LithoVox levert geen koppelingen mee: ze zijn van de gebruiker.
 
-Een model dat LithoVox tussen 8 en 10 november 2026 maakte, kan zelf parameters
-van gekoppelde grondsoorten hebben (formaatversie 3, ondertekend met de voxels;
-het laatst alleen D-Settlement). Nieuwe modellen hebben ze niet meer: LithoVox
-koppelt geen grondsoorten meer. Oudere bestanden lees je zo:
-
-```python
-model.soil_parameter_files                  # de voorbeeldbestanden: programma, bestand, ingelezen
-model.soil_parameters("d_settlement")       # {"klei": {"code": ..., "parameters": [[sleutel, waarde], ...]}, ...}
-```
-
 Waterspanningen, belastingen, mesh en rekeninstellingen vul je altijd zelf in.
 
 ### Parameterzones
 
 Een model kan parameterzones hebben: in LithoVox zet je bij een sondering of
-boring eigen volumieke gewichten voor een grondsoort, die gelden in een
+boring eigen parameters voor een grondsoort, die gelden in een
 cirkel rond dat object. Het model bewaart ze naast de grondsoorten (niet in de
 voxels, en niet ondertekend).
 
@@ -131,9 +121,9 @@ doorsnede.soils                             # o.a. "Peat (CPT000000074503)"
 Met `use_parameter_area_values=True` krijgen de voxels van de grondsoort van
 een zone die in de cirkel liggen een eigen grondsoort, "grondsoort (object)",
 met de kleur van de grondsoort van het model; ligt een voxel in meer zones,
-dan telt de zone met het dichtstbijzijnde midden. Een doorsnede die geen zone
+dan telt de zone met de dichtstbijzijnde afstand. Een doorsnede die geen zone
 raakt, blijft gelijk. Die grondsoort komt in de D-Stability-export met de
-volumieke gewichten van de zone (boven en onder de freatische lijn) en, met
+parameters van de zone en, met
 een eigen `.stix` en koppeling, met de overige parameters van de gekoppelde
 grondsoort onder een eigen code ("KLEI (CPT1)"). D-Geo Flow, DXF en CSV krijgen
 de lagen apart; bij D-Geo Flow met de doorlatendheden van de grondsoort van het
@@ -158,11 +148,9 @@ model.to_tiles("tiles.zip")    # OGC 3D Tiles (3d/tileset.json), bijvoorbeeld Ce
 model.to_laz("model.laz")      # puntenwolk, bijvoorbeeld QGIS, ArcGIS
 ```
 
-Elk neemt `voxel_width` en `voxel_height` (m; standaard 1,0 en 0,2): het model
+Elke functie accepteert `voxel_width` en `voxel_height` (m; standaard 1,0 en 0,2): het model
 wordt getoond met voxels van ongeveer die grootte, die elk de grondsoort
-krijgen die de meeste van hun modelvoxels hebben. Grotere voxels geven
-kleinere bestanden. Het model wordt in brokken gelezen, dus ook grote
-modellen passen in het geheugen.
+krijgen die de meeste van hun modelvoxels hebben. 
 
 ## Coördinaten
 
@@ -191,19 +179,12 @@ voor een doorsnede; `.glb`, `.laz` of `.zip` (3D Tiles) voor het hele model.
 ## Wijzigingen
 
 - **0.5.0**:
-  - D-Geo Flow (`to_dgeoflow`, `.flox`) is terug.
+  - D-Geo Flow (`to_dgeoflow`, `.flox`) is toegevoegd.
   - De grondsoortparameters komen uit een eigen `.stix` of `.flox` met een
     koppeling (`soils`, `mapping`; `--grondsoorten`, `--koppeling`), in plaats
     van uit het koppelbestand van LithoVox Stability (`soil_links`,
     `--koppelingen` zijn vervallen). Alleen de gebruikte grondsoorten gaan in
     de export, niet de hele bibliotheek.
-  - De XSLOPE-export (`to_xslope`, `.xlsx`/`.zip` op de opdrachtregel) is
-    vervallen.
-  - D-Stability-bestanden worden geschreven met GEOLib (`d-geolib`) in plaats
-    van lithovox-stability; zonder koppeling zijn ze inhoudelijk gelijk.
-  - Nieuwe modellen van LithoVox hebben geen grondsoortparameters meer
-    (`soil_parameters`); `model.soil_parameters()` leest ze nog uit oudere
-    bestanden.
 
 ## Meer
 
