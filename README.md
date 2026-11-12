@@ -101,8 +101,10 @@ foutmelding. Op de opdrachtregel: `lithovox-exports doorsnede dijk.nc 250
 km0.250.stix --grondsoorten grondsoorten.stix --koppeling koppeling.json`.
 LithoVox levert geen koppelingen mee: ze zijn van de gebruiker.
 
-Het model zelf kan parameters van D-Settlement-grondsoorten hebben (in LithoVox
-gekoppeld, formaatversie 3, ondertekend met de voxels):
+Een model dat LithoVox tussen 8 en 10 november 2026 maakte, kan zelf parameters
+van gekoppelde grondsoorten hebben (formaatversie 3, ondertekend met de voxels;
+het laatst alleen D-Settlement). Nieuwe modellen hebben ze niet meer: LithoVox
+koppelt geen grondsoorten meer. Oudere bestanden lees je zo:
 
 ```python
 model.soil_parameter_files                  # de voorbeeldbestanden: programma, bestand, ingelezen
@@ -110,6 +112,33 @@ model.soil_parameters("d_settlement")       # {"klei": {"code": ..., "parameters
 ```
 
 Waterspanningen, belastingen, mesh en rekeninstellingen vul je altijd zelf in.
+
+### Parameterzones
+
+Een model kan parameterzones hebben: in LithoVox zet je bij een sondering of
+boring eigen volumieke gewichten voor een grondsoort, die gelden in een
+cirkel rond dat object. Het model bewaart ze naast de grondsoorten (niet in de
+voxels, en niet ondertekend).
+
+```python
+model.parameter_areas                       # object, midden, straal, grondsoort, gamma_dry, gamma_sat
+doorsnede = model.cross_section(100)
+doorsnede.parameter_areas                   # de zones die deze doorsnede raken (leeg: geen)
+doorsnede = model.cross_section(100, use_parameter_area_values=True)
+doorsnede.soils                             # o.a. "Peat (CPT000000074503)"
+```
+
+Met `use_parameter_area_values=True` krijgen de voxels van de grondsoort van
+een zone die in de cirkel liggen een eigen grondsoort, "grondsoort (object)",
+met de kleur van de grondsoort van het model; ligt een voxel in meer zones,
+dan telt de zone met het dichtstbijzijnde midden. Een doorsnede die geen zone
+raakt, blijft gelijk. Die grondsoort komt in de D-Stability-export met de
+volumieke gewichten van de zone (boven en onder de freatische lijn) en, met
+een eigen `.stix` en koppeling, met de overige parameters van de gekoppelde
+grondsoort onder een eigen code ("KLEI (CPT1)"). D-Geo Flow, DXF en CSV krijgen
+de lagen apart; bij D-Geo Flow met de doorlatendheden van de grondsoort van het
+model. Op de opdrachtregel: `--parameterzones`; `lithovox-exports info` toont
+de zones.
 
 ## Grondopbouw op een punt
 
@@ -172,6 +201,9 @@ voor een doorsnede; `.glb`, `.laz` of `.zip` (3D Tiles) voor het hele model.
     vervallen.
   - D-Stability-bestanden worden geschreven met GEOLib (`d-geolib`) in plaats
     van lithovox-stability; zonder koppeling zijn ze inhoudelijk gelijk.
+  - Nieuwe modellen van LithoVox hebben geen grondsoortparameters meer
+    (`soil_parameters`); `model.soil_parameters()` leest ze nog uit oudere
+    bestanden.
 
 ## Meer
 

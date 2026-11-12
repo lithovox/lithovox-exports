@@ -377,3 +377,103 @@ class TestCli:
         with pytest.raises(SystemExit):
             main(["doorsnede", str(model_path), "15", str(tmp_path / f"s{suffix}")])
         assert not hasattr(CrossSection, "to_xslope")
+
+
+class TestParameterAreas:
+    """Het testmodel loopt west-oost; binnenwaarts is zuid (y neemt af). Een
+    zone rond (100010, 399997) (3 m binnenwaarts) met straal 2 raakt de
+    doorsneden op 8 tot 12 m en de afstanden 1 tot 5 m binnenwaarts (veen zit
+    op 0 tot 5 m binnenwaarts, tussen -2 en -1 m hoog)."""
+
+    AREA = {"kind": "cpt", "object": "CPT1", "x": 100010.0, "y": 399997.0, "radius": 2.0,
+            "soil": "Veen", "soilClass": "veen", "gammaDry": 10.5, "gammaSat": 11.5}
+
+    @pytest.fixture
+    def zoned(self, tmp_path) -> Model:
+        from conftest import parameter_areas, write_model
+
+        return Model(write_model(tmp_path / "zoned.nc", areas=parameter_areas(self.AREA)))
+
+    def test_read(self, zoned, model):
+        assert model.parameter_areas == []
+        (area,) = zoned.parameter_areas
+        assert area.name == "veen (CPT1)" and area.radius == 2.0 and area.gamma_sat == 11.5
+
+    def test_unreadable(self, tmp_path):
+        from conftest import parameter_areas, write_model
+
+        with pytest.raises(ValueError, match="geen grondsoort van het model"):
+            Model(write_model(tmp_path / "a.nc", areas=parameter_areas({**self.AREA, "soilClass": "rots"})))
+        with pytest.raises(ValueError, match="radius"):
+            Model(write_model(tmp_path / "b.nc", areas=parameter_areas({**self.AREA, "radius": 0})))
+        with pytest.raises(ValueError, match="versie 2"):
+            Model(write_model(tmp_path / "c.nc", areas={"version": 2, "points": []}))
+
+    def test_a_section_far_away_is_the_same(self, zoned, model):
+        far = zoned.cross_section(25.0, use_parameter_area_values=True)
+        assert far.parameter_areas == [] and far.soils == ["klei", "veen", "zand"]
+        assert far.polygons == model.cross_section(25.0).polygons
+
+    def test_a_section_through_an_area(self, zoned):
+        plain = zoned.cross_section(10.0)
+        assert [a.object for a in plain.parameter_areas] == ["CPT1"]
+        assert "veen (CPT1)" not in plain.soils
+        section = zoned.cross_section(10.0, use_parameter_area_values=True)
+        assert "veen (CPT1)" in section.soils
+        assert section.slice.colors["veen (CPT1)"] == section.slice.colors["veen"]
+        # Alleen de voxels van veen in de cirkel (afstand 1 tot 5 m, minus de rand): de rest blijft veen.
+        columns = {j for j in range(len(section.slice.u)) if (section.slice.labels[j] >= 3).any()}
+        assert columns and all(1 <= section.slice.u[j] <= 5 for j in columns)
+        assert section.slice.model_soils == ["zand", "klei", "veen"]
+
+    def test_the_nearest_area_wins(self, tmp_path):
+        from conftest import parameter_areas, write_model
+
+        near = {**self.AREA, "object": "CPT2", "y": 399999.0, "gammaDry": 12.0, "gammaSat": 13.0}
+        model = Model(write_model(tmp_path / "two.nc", areas=parameter_areas(self.AREA, near)))
+        section = model.cross_section(10.0, use_parameter_area_values=True)
+        assert {"veen (CPT1)", "veen (CPT2)"} <= set(section.slice.soils)
+        # Het midden van CPT2 ligt op 1 m binnenwaarts: daar hoort de voxel bij CPT2.
+        j = int(abs(section.slice.u - 1.25).argmin())
+        k = int(abs(section.slice.z + 1.5).argmin())
+        assert section.slice.soils[section.slice.labels[j, k]] == "veen (CPT2)"
+
+    def test_dstability(self, zoned, tmp_path):
+        section = zoned.cross_section(10.0, use_parameter_area_values=True)
+        soils = soils_of_layers(section.to_dstability(tmp_path / "zone.stix"))
+        zone = soils["veen (CPT1)"]
+        assert zone.Code == "veen (CPT1)"
+        assert zone.VolumetricWeightAbovePhreaticLevel == 10.5 and zone.VolumetricWeightBelowPhreaticLevel == 11.5
+        # Zonder de waarden is er geen zone.
+        plain = soils_of_layers(zoned.cross_section(10.0).to_dstability(tmp_path / "plain.stix"))
+        assert set(plain) == {"zand", "klei", "veen"}
+
+    def test_dstability_linked(self, zoned, tmp_path, stix_library):
+        section = zoned.cross_section(10.0, use_parameter_area_values=True)
+        mapping = {"veen": "KLEI"}
+        soils = soils_of_layers(section.to_dstability(tmp_path / "zone.stix", stix_library, mapping))
+        zone = soils["veen (CPT1)"]
+        assert zone.Code == "KLEI (CPT1)"
+        assert zone.VolumetricWeightAbovePhreaticLevel == 10.5 and zone.VolumetricWeightBelowPhreaticLevel == 11.5
+        # De grondsoort uit het bestand blijft heel waar de zone niet komt.
+        assert soils["klei"].Code == "klei"
+
+    def test_dgeoflow_and_others(self, zoned, tmp_path):
+        section = zoned.cross_section(10.0, use_parameter_area_values=True)
+        assert section.to_dgeoflow(tmp_path / "zone.flox").exists()
+        assert section.to_dxf(tmp_path / "zone.dxf").exists()
+        assert section.to_csv(tmp_path / "zone.csv").exists()
+        assert section.plot() is not None
+
+    def test_cli(self, zoned, tmp_path, capsys):
+        assert main(["info", str(zoned.path)]) == 0
+        assert "veen (CPT1)" in capsys.readouterr().out
+        out = tmp_path / "zone.stix"
+        assert main(["doorsnede", str(zoned.path), "10", str(out), "--parameterzones"]) == 0
+        assert "veen (CPT1)" in {s.Code for s in _stix_soils(out)}
+
+
+def _stix_soils(path):
+    stix = DStabilityModel()
+    stix.parse(path)
+    return stix.datastructure.soils.Soils

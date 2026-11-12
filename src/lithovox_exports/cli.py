@@ -29,6 +29,11 @@ def _info(model: Model) -> None:
         f"crs             {model.crs}, verticaal: {model.vertical_datum or 'onbekend'}"
     )
     print(f"grondsoorten    {', '.join(model.soils)}")
+    for area in model.parameter_areas:
+        print(
+            f"parameterzone   {area.name}: straal {area.radius:g} m, "
+            f"gamma {area.gamma_dry:g}/{area.gamma_sat:g} kN/m3"
+        )
     # De parameters die in LithoVox aan de grondsoorten gekoppeld zijn.
     for source in model.soil_parameter_files:
         linked = model.soil_parameters(source["software"])
@@ -40,7 +45,7 @@ def _info(model: Model) -> None:
 
 
 def _section(model: Model, args: argparse.Namespace) -> Path:
-    section = model.cross_section(args.metrering, args.smoothing)
+    section = model.cross_section(args.metrering, args.smoothing, args.parameterzones)
     path, suffix = args.uitvoer, args.uitvoer.suffix.lower()
     if suffix == ".stix":
         return section.to_dstability(path, args.grondsoorten, args.koppeling)
@@ -87,6 +92,11 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=SMOOTHING,
         help=f"in voxels (standaard {SMOOTHING})",
+    )
+    section.add_argument(
+        "--parameterzones",
+        action="store_true",
+        help="gebruik de waarden van de parameterzones van het model (zie 'info')",
     )
     section.add_argument(
         "--grondsoorten",

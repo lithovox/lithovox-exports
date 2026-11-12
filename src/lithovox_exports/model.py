@@ -19,7 +19,8 @@ from .dgeoflow import write_flox
 from .dstability import write_stix
 from .dxf import write_dxf
 from .grid import ModelCrs, chainage_label, read_grid, read_metadata
-from .profile import SMOOTHING, ProfileSlice, SoilPolygon, read_slice, section_polygons
+from .parameter_areas import ParameterArea, read_parameter_areas
+from .profile import SMOOTHING, ProfileSlice, SoilPolygon, apply_parameter_areas, read_slice, section_polygons
 from .soil_library import linked_soils
 from .soil_parameters import mapping_of, read_soil_parameters
 
@@ -37,6 +38,10 @@ class CrossSection:
     crs: ModelCrs
     # Het model waar de doorsnede uit komt (met de gekoppelde grondsoortparameters).
     model: "Model | None" = field(default=None, repr=False, compare=False)
+    # De parameterzones van het model die deze doorsnede raken (ook zonder
+    # use_parameter_area_values), en of hun waarden in de doorsnede zitten.
+    parameter_areas: list[ParameterArea] = field(default_factory=list)
+    use_parameter_area_values: bool = False
 
     @property
     def label(self) -> str:
@@ -58,6 +63,31 @@ class CrossSection:
         """x, y van het binnenwaartse eind (B)."""
         return self.slice.to_world(float(self.slice.u[-1] + self.slice.du / 2))
 
+    def _linked(self, soils, mapping, suffix: str):
+        """De gekoppelde grondsoorten (zie soil_library.linked_soils) voor de
+        grondsoorten van het model, en de volumieke gewichten (boven, onder
+        de freatische lijn) per grondsoort van een parameterzone. Een zone
+        erft de koppeling van haar grondsoort, onder een eigen code, zodat de
+        gewichten van de zone erin komen en de grondsoort uit `soils` heel
+        blijft."""
+        section = self.slice
+        linked = linked_soils(section.model_soils, soils, mapping, suffix)
+        weights: dict[str, tuple[float, float]] = {}
+        for _, (code, area) in section.variants.items():
+            weights[area.name] = (area.gamma_dry, area.gamma_sat)
+            parent = linked.get(section.soils[code])
+            if parent is not None and suffix == ".stix":
+                linked[area.name] = {
+                    **parent,
+                    "Code": f"{parent['Code']} ({area.object})",
+                    "Name": f"{parent.get('Name') or parent['Code']} ({area.object})",
+                    "VolumetricWeightAbovePhreaticLevel": area.gamma_dry,
+                    "VolumetricWeightBelowPhreaticLevel": area.gamma_sat,
+                }
+            elif parent is not None:
+                linked[area.name] = parent
+        return linked, weights
+
     def _check(self) -> None:
         if not self.polygons:
             raise ValueError(
@@ -78,11 +108,14 @@ class CrossSection:
         zijn naam. Alleen de gebruikte grondsoorten gaan erin. Water,
         belastingen en rekeninstellingen vul je zelf in. ValueError bij een
         verkeerd bestand, een onbekende grondsoort of code (zie
-        soil_library.py)."""
+        soil_library.py). Heeft de doorsnede de waarden van parameterzones
+        (`use_parameter_area_values`), dan krijgt elke grondsoort in een zone
+        een eigen grondsoort met de volumieke gewichten van de zone, en de
+        overige parameters van de grondsoort van het model."""
         self._check()
         path = Path(path)
-        linked = linked_soils(self.slice.soils, soils, mapping, ".stix")
-        write_stix(self.slice, self.polygons, path, self.label, linked)
+        linked, weights = self._linked(soils, mapping, ".stix")
+        write_stix(self.slice, self.polygons, path, self.label, linked, weights)
         return path
 
     def to_dgeoflow(
@@ -95,10 +128,12 @@ class CrossSection:
         Met `soils` (een eigen `.flox`) en `mapping` (zie to_dstability)
         krijgen de gekoppelde grondsoorten hun doorlatendheden uit `soils`;
         de andere alleen hun naam. Randvoorwaarden, mesh en
-        rekeninstellingen vul je zelf in."""
+        rekeninstellingen vul je zelf in. D-Geo Flow heeft de gewichten van
+        parameterzones niet nodig: een grondsoort in een zone heeft de
+        doorlatendheden van de grondsoort van het model."""
         self._check()
         path = Path(path)
-        linked = linked_soils(self.slice.soils, soils, mapping, ".flox")
+        linked, _ = self._linked(soils, mapping, ".flox")
         write_flox(self.slice, self.polygons, path, self.label, linked)
         return path
 
@@ -184,6 +219,7 @@ class Model:
             self.metadata: dict = read_metadata(f)
             self.grid = read_grid(f)
             self._soil_parameters: dict | None = read_soil_parameters(f)
+        self._parameter_areas = read_parameter_areas(self.metadata, self.grid.soils)
 
     def __repr__(self) -> str:
         return f"Model({self.project!r}, {self.name!r}, {self.length:.0f} m, {len(self.soils)} grondsoorten)"
@@ -217,11 +253,20 @@ class Model:
         return list(self.grid.soils)
 
     @property
+    def parameter_areas(self) -> list[ParameterArea]:
+        """De parameterzones van het model: cirkels rond sonderingen en
+        boringen waarin een grondsoort eigen volumieke gewichten heeft (zie
+        parameter_areas.py). Leeg bij een model zonder zones."""
+        return list(self._parameter_areas)
+
+    @property
     def soil_parameter_files(self) -> list[dict]:
         """De voorbeeldbestanden waarvan het model grondsoortparameters heeft:
         per programma `software` ("d_stability", "d_settlement"), `label`
         ("D-Stability"), `file`, `sha256` en `loaded` (wanneer LithoVox het
-        las). Leeg als er in LithoVox geen grondsoorten gekoppeld zijn."""
+        las). Leeg als er in LithoVox geen grondsoorten gekoppeld zijn, en
+        altijd bij modellen van na 10 november 2026 (LithoVox koppelt geen
+        grondsoorten meer)."""
         return [
             {key: m.get(key) for key in ("software", "label", "file", "sha256", "loaded")}
             for m in (self._soil_parameters or {}).get("mappings") or []
@@ -235,7 +280,7 @@ class Model:
         een D-Stability-grondsoort als dict zoals in soils.json, een
         D-Settlement-grondsoort als lijst van [sleutel, waarde]-paren), of
         None als er geen gekoppeld is. Leeg als het model geen koppeling voor
-        `software` heeft."""
+        `software` heeft (altijd bij modellen van na 10 november 2026)."""
         mapping = mapping_of(self._soil_parameters, software)
         if mapping is None:
             return {}
@@ -293,19 +338,36 @@ class Model:
         return float(z[0]), float(z[-1])
 
     def cross_section(
-        self, chainage: float, smoothing: float = SMOOTHING
+        self,
+        chainage: float,
+        smoothing: float = SMOOTHING,
+        use_parameter_area_values: bool = False,
     ) -> CrossSection:
         """De dwarsdoorsnede bij de kolom die het dichtst bij `chainage` ligt (m
         langs de referentielijn). `smoothing` (in voxels) maakt de grenzen
-        tussen grondsoorten glad; 0 houdt de trap van de voxels."""
+        tussen grondsoorten glad; 0 houdt de trap van de voxels.
+        `use_parameter_area_values`: een grondsoort in een parameterzone van
+        het model wordt in de doorsnede een eigen grondsoort, "Peat
+        (CPT000000074503)", met de gewichten van de zone (zie
+        `CrossSection.parameter_areas` voor de zones die de doorsnede raken).
+        Een doorsnede die geen zone raakt, blijft gelijk."""
         with h5py.File(self.path, "r") as f:
             section = read_slice(f, chainage)
+        crossed = [
+            a
+            for a in self._parameter_areas
+            if a.crosses(section.to_world(float(section.u[0] - section.du / 2)), section.to_world(float(section.u[-1] + section.du / 2)))
+        ]
+        if use_parameter_area_values:
+            apply_parameter_areas(section, crossed)
         return CrossSection(
             chainage=chainage,
             slice=section,
             polygons=section_polygons(section, smoothing),
             crs=self.grid.crs,
             model=self,
+            parameter_areas=crossed,
+            use_parameter_area_values=use_parameter_area_values,
         )
 
     def cross_sections(
@@ -314,12 +376,13 @@ class Model:
         start: float = 0.0,
         stop: float | None = None,
         smoothing: float = SMOOTHING,
+        use_parameter_area_values: bool = False,
     ) -> Iterator[CrossSection]:
         """Dwarsdoorsneden om de `every` m, van `start` tot en met `stop`
         (standaard: het eind van de lijn), een voor een gemaakt."""
         stop = self.length if stop is None else stop
         for chainage in np.arange(start, stop + 1e-9, every):
-            yield self.cross_section(float(chainage), smoothing)
+            yield self.cross_section(float(chainage), smoothing, use_parameter_area_values)
 
     def locate(self, x: float, y: float) -> tuple[float, float]:
         """De metrering en afstand tot de referentielijn (m) van de modelkolom

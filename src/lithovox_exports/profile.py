@@ -2,7 +2,7 @@
 rekensoftware zoals D-Stability."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import h5py
 import numpy as np
@@ -11,6 +11,7 @@ from shapely import LineString, MultiLineString, Point, Polygon
 from shapely.ops import linemerge, polygonize, unary_union
 
 from .grid import _number
+from .parameter_areas import ParameterArea
 
 # Gebieden van één grondsoort met minder voxels dan dit zijn ruis van de
 # kriging: ze krijgen de grondsoort die de meeste van hun buren hebben.
@@ -40,6 +41,14 @@ class ProfileSlice:
     ground: np.ndarray  # (nd,) maaiveld (m), NaN waar onbekend
     soils: list[str]
     colors: dict[str, str]
+    # Per grondsoort die uit een parameterzone komt (zie apply_parameter_areas):
+    # zijn code in `labels` → de index van de grondsoort van het model en de zone.
+    variants: dict[int, tuple[int, ParameterArea]] = field(default_factory=dict)
+
+    @property
+    def model_soils(self) -> list[str]:
+        """De grondsoorten van het model, zonder die van de parameterzones."""
+        return self.soils[: len(self.soils) - len(self.variants)]
 
     def to_world(self, u: float) -> tuple[float, float]:
         """x, y (in het coördinatenstelsel van het model) van het punt `u` meter van de referentielijn."""
@@ -121,6 +130,39 @@ def read_slice(f: h5py.File, chainage: float) -> ProfileSlice:
     if "source" in f:
         _fill_left_out(f, section)
     return section
+
+
+def apply_parameter_areas(section: ProfileSlice, areas: list[ParameterArea]) -> None:
+    """Geeft in `section` de voxels van de grondsoort van een parameterzone die
+    in de zone liggen een eigen grondsoort, "grondsoort (object)", met de
+    kleur van de grondsoort van het model. Een voxel in meer zones van zijn
+    grondsoort hoort bij die met het dichtstbijzijnde midden. Verandert
+    `labels`, `soils`, `colors` en `variants`; alleen zones die een voxel
+    raken geven een nieuwe grondsoort."""
+    if not areas:
+        return
+    px, py = np.array([section.to_world(float(u)) for u in section.u]).T
+    for name in section.model_soils:
+        code = section.soils.index(name)
+        candidates = [a for a in areas if a.soil_class == name]
+        if not candidates:
+            continue
+        distance = np.array([a.distance(px, py) for a in candidates])
+        winner = np.argmin(distance, axis=0)
+        inside = np.take_along_axis(distance, winner[None], axis=0)[0] <= np.array([a.radius for a in candidates])[winner]
+        for n, area in enumerate(candidates):
+            columns = inside & (winner == n)
+            cells = columns[:, None] & (section.labels == code)
+            if not cells.any():
+                continue
+            new = len(section.soils)
+            if new > np.iinfo(section.labels.dtype).max:
+                raise ValueError("Te veel parameterzones in één doorsnede")
+            section.soils.append(area.name)
+            if name in section.colors:
+                section.colors[area.name] = section.colors[name]
+            section.variants[new] = (code, area)
+            section.labels[cells] = new
 
 
 def remove_specks(labels: np.ndarray, min_voxels: int = MIN_REGION_VOXELS) -> np.ndarray:

@@ -16,7 +16,7 @@ from geolib.models.dstability.internal import (
     PersistableSoil,
     PersistableSoilVisualization,
 )
-from geolib.soils.soil import Soil
+from geolib.soils.soil import Soil, SoilWeightParameters
 
 from .profile import ProfileSlice, SoilPolygon
 from .soil_library import layer_soils
@@ -38,11 +38,14 @@ def write_stix(
     path: Path,
     label: str = "",
     linked: dict[str, dict] | None = None,
+    weights: dict[str, tuple[float, float]] | None = None,
 ) -> None:
     """Schrijft `polygons` (x = afstand tot de referentielijn, positief
     binnenwaarts; z = hoogte) als D-Stability-model naar `path`. `linked`:
     per modelgrondsoort de D-Stability-grondsoort (zoals in soils.json) die
-    hij krijgt (zie soil_library.linked_soils)."""
+    hij krijgt (zie soil_library.linked_soils). `weights`: per modelgrondsoort
+    zonder koppeling de volumieke gewichten (boven, onder de freatische lijn,
+    kN/m3) die hij krijgt."""
     model = DStabilityModel()
     # Alleen de grondsoorten van de doorsnede: niet de standaardgrondsoorten van D-Stability.
     model.datastructure.soils.Soils = []
@@ -57,7 +60,13 @@ def write_stix(
             model.datastructure.soils.Soils.append(persistable)
             soil_id = persistable.Id
         else:
-            soil_id = model.add_soil(Soil(name=soil["name"], code=soil["code"]))
+            gamma = (weights or {}).get(soil["color_of"])
+            extra = (
+                {"soil_weight_parameters": SoilWeightParameters(unsaturated_weight=gamma[0], saturated_weight=gamma[1])}
+                if gamma
+                else {}
+            )
+            soil_id = model.add_soil(Soil(name=soil["name"], code=soil["code"], **extra))
         color = argb(section.colors.get(soil["color_of"]))
         if color:
             model.datastructure.soilvisualizations.SoilVisualizations.append(

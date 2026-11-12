@@ -26,9 +26,11 @@ voorbeeldbestand: een D-Stability-grondsoort als zijn JSON-object, een
 D-Settlement-grondsoort als lijst van [sleutel, waarde]-paren (waarden als
 tekst). Het bedrijf ondertekent ze samen met de voxels.
 
-Sinds november 2026 koppel je de D-Stability-grondsoorten niet meer in
-LithoVox: het `.nc` heeft dan alleen nog D-Settlement. Voor de exports geef
-je een eigen `.stix` of `.flox` met een koppeling (zie soil_library.py)."""
+Sinds 9 november 2026 koppel je de D-Stability-grondsoorten niet meer in
+LithoVox, en sinds 10 november 2026 ook de D-Settlement-grondsoorten niet:
+nieuwe modellen hebben het attribuut niet meer. Dit module leest het nog uit
+oudere bestanden. Voor de exports geef je een eigen `.stix` of `.flox` met een
+koppeling (zie soil_library.py)."""
 
 import json
 from pathlib import Path

@@ -13,7 +13,7 @@ SOILS = ["zand", "klei", "veen"]
 COLORS = {"zand": "#ffcc00", "klei": "#336633", "veen": "#664422"}
 
 
-def write_model(path: Path, soil_parameters: dict | None = None) -> Path:
+def write_model(path: Path, soil_parameters: dict | None = None, areas: dict | None = None) -> Path:
     """Een klein corridormodel zoals LithoVox het schrijft: 30 m rechte lijn
     van west naar oost (buitenkant links, dus binnenwaarts is naar het
     zuiden), zand onder klei met een veenlens erin, maaiveld op 1 m. Met
@@ -39,6 +39,8 @@ def write_model(path: Path, soil_parameters: dict | None = None) -> Path:
         "crs": {"code": 28992, "horizontal": "EPSG:28992", "vertical": "unknown datum", "units": "m"},
         "chainageLine": {"points": line, "length": 30.0, "outwardsSide": "left"},
     }
+    if areas is not None:
+        metadata["localSoilParameters"] = areas
     with h5py.File(path, "w") as f:
         f.attrs["lithovox_format"] = "lithovox-corridor-model"
         f.attrs["lithovox_format_version"] = 1
@@ -67,3 +69,8 @@ def write_model(path: Path, soil_parameters: dict | None = None) -> Path:
 @pytest.fixture(scope="session")
 def model_path(tmp_path_factory) -> Path:
     return write_model(tmp_path_factory.mktemp("model") / "model.nc")
+
+
+def parameter_areas(*points: dict) -> dict:
+    """De metadata `localSoilParameters` zoals LithoVox ze schrijft (versie 1)."""
+    return {"version": 1, "comment": "test", "units": {"gammaDry": "kN/m3"}, "points": list(points)}
